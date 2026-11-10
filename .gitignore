@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+*-setup.json
+*-fixtures.json
+.hermes/
