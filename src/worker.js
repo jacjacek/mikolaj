@@ -277,6 +277,13 @@ export default {
     };
     const asset = assets[url.pathname];
     if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
+    if (asset[0] === html && request.method === 'GET') {
+      // Per-response nonce so Cloudflare Bot Fight JS Detections can inject its inline bootstrap without 'unsafe-inline'.
+      const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+      const body = html.replace('<script type="module" src="/app.js"></script>', `<script type="module" src="/app.js" nonce="${nonce}"></script>`);
+      const csp = SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`);
+      return new Response(body, { headers: { ...SECURITY, 'Content-Security-Policy': csp, 'Content-Type': asset[1], 'Cache-Control': 'no-cache' } });
+    }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers: { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': 'no-cache' } });
   },
 };

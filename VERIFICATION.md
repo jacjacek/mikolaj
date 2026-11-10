@@ -32,6 +32,15 @@ Interactions verified against the deployed API:
 
 The browser used only generated preview-account session cookies for authenticated QA; no user's password was entered or collected. Account creation and password login were exercised via the real API. Production accounts have not been created by the agent.
 
+## Production
+
+- Custom domain `https://mikolaj.walasek.xyz/` attached to the production Worker and read back through Cloudflare API. Exact DNS read-back: proxied AAAA `100::` for this hostname only.
+- HTTPS root and JavaScript returned HTTP 200 with correct MIME types; HTTP root returned 301 to HTTPS.
+- Production health endpoint returned `{ok:true,storage:"sqlite",version:"1"}`; anonymous `/api/me` returned `{user:null}` and reservations returned 401.
+- Production login and private family-creation screens were visually inspected at 390×844. The setup screen had all four account/family fields and no horizontal overflow; no production account was created.
+- Initial headless headers triggered Cloudflare edge verification. Application HTML now includes a fresh per-response CSP nonce compatible with Cloudflare JavaScript Detections, without `unsafe-inline`; two HTTP reads confirmed matching HTML/CSP nonces and different nonces per response. Production app loaded with normal Chrome headers. No zone-wide security controls were disabled.
+- The real production bootstrap secret was validated by a request deliberately rejected for an empty family name before account creation. Production remains ready for the user's first family.
+
 ## Deliberate limitations
 
 No automatic password reset, outgoing email, email verification, drawing Secret Santa pairs, photo uploads or dark mode. Invitation links remain valid until the administrator rotates them; no time-based expiry is claimed. Prices are indicative and links are provided by family members, not fetched from shops.
