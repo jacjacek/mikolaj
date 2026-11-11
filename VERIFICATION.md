@@ -2,6 +2,14 @@
 
 Verified against the real isolated Cloudflare Worker, not local mocks. No dependency installation, compilation, bundling, Node/TypeScript linting or local server was used on Mikrus. The browser executed the deployed JavaScript.
 
+## Latest UI: two tabs and nested disclosures
+
+`tests/ui_two_tabs.py` passed **33/33 checks** against the real isolated Cloudflare preview. The suite verifies exactly two primary tabs, the combined own-letter/wishes/reservations page, independent person accordions and nested gift details, preserving expanded state during reservation and purchase, contextual onboarding for each missing-content combination, all own empty-state CTAs and another person's empty list, snapshots and recipient privacy scoped to the own-wishes section, unsaved-letter protection, safe literal note rendering and Polish pricing, real reload persistence, old-link compatibility, local reset, zero private API requests and zero collected runtime/CSP errors. Mobile layouts at 390×844 and 320×740 and desktop at 1440×1000 passed overflow checks. The complete report is `tests/results/two-tabs-preview.json`.
+
+The new default, combined Moje view and an expanded gift were visually inspected in an actual mobile browser on preview before publishing. The visual check caught and removed literal null placeholders from optional lazy-row content and refined gift summary alignment and the compact reservations shortcut. Backend, demo storage schema/key and authorization were not changed.
+
+The API results and the pre-two-tab UI results below are historical verification of their respective versions, not additional checks counted in the new 33-check suite.
+
 ## API
 
 - `tests/live_api.py`: **47 passing checks** on the isolated preview, including account creation/login/logout, invitation access and rotation, letter/wish persistence, ownership, invalid URL/price/size handling, cross-origin write rejection, reservation release/purchase and parallel reservation conflict.

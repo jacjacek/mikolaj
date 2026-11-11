@@ -293,13 +293,29 @@ const state = {
   inviteUrl: null,
   editingLetter: false,
   letterDirty: false,
-  memberFilter: 'all',
+
   lastVisibleRefresh: 0,
   booting: true,
   appHash: '',
 };
 let letterNode = null;
-const letterDisclosureState = new Map();
+const disclosureState = new Map();
+
+function rememberDisclosure(node, key) {
+  const scopedKey = `${state.me.user.id}:${key}`;
+  node.dataset.disclosure = scopedKey;
+  node.open = disclosureState.get(scopedKey) === true;
+  node.addEventListener('toggle', () => {
+    if (node.isConnected) disclosureState.set(scopedKey, node.open);
+  });
+  return node;
+}
+
+function saveDisclosures() {
+  for (const node of mainEl().querySelectorAll('details[data-disclosure]')) {
+    disclosureState.set(node.dataset.disclosure, node.open);
+  }
+}
 
 // ---------- Fragment URL: #setup= / #invite= ----------
 
@@ -833,7 +849,7 @@ function renderShell() {
   d.getElementById('session-name').textContent = user.name;
   d.getElementById('logout-btn').setAttribute('aria-label', `Wyloguj się (${user.name})`);
   if (!DEMO) d.getElementById('brand-family').hidden = true;
-  d.querySelector('[data-nav="invite"]').hidden = DEMO || !user.isAdmin;
+
   renderPendingNotice();
 }
 
@@ -874,8 +890,9 @@ function parseRoute() {
   const [seg, arg] = hash.slice(2).split('/');
   switch (seg) {
     case '': return { name: 'home' };
-    case 'moja-lista': return { name: 'mine' };
-    case 'rezerwacje': return { name: 'reservations' };
+    case 'moje':
+    case 'moja-lista':
+    case 'rezerwacje': return { name: 'mine' };
     case 'zaproszenie': return { name: 'invite' };
     case 'osoba': {
       if (!arg) return { name: 'home' };
@@ -886,22 +903,20 @@ function parseRoute() {
 }
 
 const ROUTES = {
-  home: { title: () => 'Listy bliskich', render: () => viewHome() },
+  home: { title: () => 'Listy', render: () => viewHome() },
   mine: {
-    title: () => 'Mój list',
-    load: async () => normMemberWishes(await api('GET', `/api/members/${encodeURIComponent(state.me.user.id)}/wishes`), state.me.user.id),
-    render: data => viewMine(data),
+    title: () => 'Moje',
+    load: async () => {
+      const id = state.me.user.id;
+      const [mine, reservations] = await Promise.all([
+        api('GET', `/api/members/${encodeURIComponent(id)}/wishes`),
+        api('GET', '/api/reservations'),
+      ]);
+      return { mine: normMemberWishes(mine, id), reservations: normReservations(reservations) };
+    },
+    render: data => viewMy(data),
   },
-  member: {
-    title: data => data.member.name,
-    load: async route => normMemberWishes(await api('GET', `/api/members/${encodeURIComponent(route.id)}/wishes`), state.me.user.id),
-    render: data => viewMember(data),
-  },
-  reservations: {
-    title: () => 'Moje prezenty',
-    load: async () => normReservations(await api('GET', '/api/reservations')),
-    render: data => viewReservations(data),
-  },
+
   invite: { title: () => 'Zaproś bliskich', render: () => viewInvite() },
   notfound: { title: () => 'Nie znaleziono', render: () => viewNotFound() },
 };
@@ -922,16 +937,20 @@ let routeSeq = 0;
 
 async function renderRoute({ quiet = false, silent = false, initial = false } = {}) {
   if (!state.me) return;
+  saveDisclosures();
   const seq = ++routeSeq;
   let route = parseRoute();
-  if (route.name === 'member' && route.id === state.me.user.id) {
-    history.replaceState(null, '', '#/moja-lista');
-    route = { name: 'mine' };
+  if (route.name === 'member') {
+    disclosureState.set(`${state.me.user.id}:person:${route.id}`, true);
+    history.replaceState(null, '', '#/');
+    route = { name: 'home' };
+  } else if (route.name === 'mine' && location.hash !== '#/moje') {
+    history.replaceState(null, '', '#/moje');
   }
   if (!quiet) {
     state.editingLetter = false;
     state.letterDirty = false;
-    state.memberFilter = 'all';
+
     letterNode = null;
     closeAllDialogs();
   }
@@ -1043,9 +1062,9 @@ function addWishButton(fkey) {
   return btn;
 }
 
-function sectionHead(id, title, n, action) {
+function sectionHead(id, title, n, action, tag = 'h2') {
   return h('div', { class: 'section-head' },
-    h('h2', { class: 'section-title', id },
+    h(tag, { class: 'section-title', id },
       title,
       n ? h('span', { class: 'section-count', text: String(n) }) : null),
     action || null);
@@ -1057,46 +1076,90 @@ function viewHome() {
   const { user, family, members } = state.me;
   const all = members.some(m => m.id === user.id) ? members : [...members, { id: user.id, name: user.name, letter: '', wishCount: 0 }];
   const people = [...all].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-  const alone = people.length < 2;
-
-  let foot = null;
-  if (alone) {
-    foot = h('div', { class: 'empty' },
-      h('p', { class: 'empty__text', text: user.isAdmin
-        ? 'Na razie jesteś tu tylko Ty. Wyślij bliskim prywatny link zaproszenia.'
-        : 'Na razie jesteś tu tylko Ty. Listy bliskich pojawią się, gdy dołączą.' }),
-      user.isAdmin ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/zaproszenie' }, icon('link', 'icon icon--sm'), 'Zaproś bliskich') : null);
-  } else if (user.isAdmin) {
-    foot = h('p', { class: 'page-foot' }, h('a', { class: 'text-link', href: '#/zaproszenie' }, icon('plus', 'icon icon--sm'), 'Zaproś kolejną osobę'));
+  const mine = all.find(m => m.id === user.id);
+  const missingLetter = !mine.letter.trim();
+  const missingWishes = !mine.wishCount;
+  let prompt = null;
+  if (missingLetter || missingWishes) {
+    const both = missingLetter && missingWishes;
+    prompt = h('aside', { class: 'setup-prompt', 'aria-label': 'Uzupełnij swój list' },
+      h('div', null,
+        h('p', { class: 'setup-prompt__title', text: both ? 'Podpowiedz bliskim, co Cię ucieszy' : missingLetter ? 'Dodaj kilka słów od siebie' : 'Dodaj pierwsze życzenie' }),
+        h('p', { class: 'setup-prompt__text', text: both ? 'Napisz swój list i dodaj życzenia, żeby bliscy wiedzieli, co wybrać.' : missingLetter ? 'Życzenia już masz. Napisz jeszcze swój list do Mikołaja.' : 'Twój list jest gotowy. Dodaj prezenty, które chętnie znajdziesz pod choinką.' })),
+      h('a', { class: 'btn btn--primary btn--sm', href: '#/moje', 'data-fkey': 'complete-mine' }, both ? 'Uzupełnij moje' : missingLetter ? 'Napisz list' : 'Dodaj życzenie'));
   }
-
-  return h('div', { class: 'page container' },
-    pageHead({
-      title: 'Listy bliskich',
-      meta: `${family.name} · ${count(people.length, FORMS.person)}`,
-      action: addWishButton('home-add'),
-    }),
-    h('ul', { class: 'people', role: 'list' }, people.map(m => h('li', null, personCard(m, m.id === user.id)))),
-    foot);
+  return h('div', { class: 'page container page--narrow' },
+    pageHead({ title: 'Listy', meta: `${family.name} · ${count(people.length, FORMS.person)}` }),
+    prompt,
+    h('div', { class: 'family-lists' }, people.map(personAccordion)),
+    people.length < 2 ? h('div', { class: 'empty' },
+      h('p', { class: 'empty__text', text: 'Listy bliskich pojawią się, gdy dołączą do rodziny.' }),
+      user.isAdmin && !DEMO ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/zaproszenie' }, 'Zaproś bliskich') : null) : null);
 }
 
-function personCard(m, self) {
-  const text = snippet(m.letter, 160);
-  return h('a', {
-    class: `person${self ? ' person--self' : ''}`,
-    href: self ? '#/moja-lista' : `#/osoba/${encodeURIComponent(m.id)}`,
-    'data-fkey': `person-${m.id}`,
-  },
-  h('span', { class: 'person__head' },
-    h('span', { class: 'person__name', text: m.name }),
-    self ? h('span', { class: 'tag tag--accent', text: 'Twój list' }) : null),
-  h('span', {
-    class: `person__preview${text ? '' : ' is-empty'}`,
-    text: text ? capFirst(text) : (self ? 'Nie masz jeszcze listu.' : 'Bez listu.'),
-  }),
-  h('span', { class: 'person__meta' },
-    h('span', { text: m.wishCount ? count(m.wishCount, FORMS.wish) : 'Brak życzeń' }),
-    icon('arrow-right', 'icon icon--sm person__arrow')));
+function personAccordion(member) {
+  const viewerId = state.me.user.id;
+  const own = member.id === viewerId;
+  const content = h('div', { class: 'person-fold__body' });
+  const row = rememberDisclosure(h('details', { class: 'person-fold', 'data-person-id': member.id },
+    h('summary', { class: 'person-fold__summary', 'data-fkey': `person-${member.id}` },
+      h('h2', { class: 'person__name', text: member.name }),
+      own ? h('span', { class: 'tag tag--accent', text: 'Twój list' }) : null,
+      h('span', { class: 'person-fold__count', text: count(member.wishCount, FORMS.wish) }),
+      icon('arrow-right', 'icon icon--sm disclosure-arrow')),
+    content), `person:${member.id}`);
+  let loading = false;
+  let loaded = false;
+  const filterKey = `${viewerId}:filter:${member.id}`;
+  const getFilter = () => disclosureState.get(filterKey) ? 'free' : 'all';
+  const load = async () => {
+    if (loading || loaded || !row.open) return;
+    loading = true;
+    content.setAttribute('aria-busy', 'true');
+    content.replaceChildren(h('p', { class: 'muted', role: 'status', text: 'Wczytywanie listu…' }));
+    try {
+      const data = normMemberWishes(await api('GET', `/api/members/${encodeURIComponent(member.id)}/wishes`), viewerId);
+      if (!row.isConnected || state.me?.user.id !== viewerId) return;
+      loaded = true;
+      const empty = h('div', { class: 'empty' },
+        h('p', { class: 'empty__text', text: own ? 'Nie masz jeszcze życzeń. Dodaj pierwsze, żeby bliscy wiedzieli, co wybrać.' : 'Ta osoba nie dodała jeszcze życzeń. Zajrzyj do pozostałych list.' }),
+        own ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/moje' }, 'Dodaj pierwsze życzenie') : null);
+      if (!own) {
+        const back = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, 'Zobacz pozostałe listy');
+        back.addEventListener('click', () => { row.open = false; row.querySelector('summary').focus(); });
+        empty.append(back);
+      }
+      const slot = h('div', { class: 'wishes-slot' });
+      const fill = () => {
+        const items = getFilter() === 'free' && !own ? data.wishes.filter(w => !w.reserved || w.reservedByMe) : data.wishes;
+        slot.replaceChildren(items.length
+          ? h('ul', { class: 'wishes', role: 'list' }, items.map(w => h('li', null, own ? ownWishCard(w) : otherWishCard(w))))
+          : data.wishes.length ? h('p', { class: 'empty__text', text: 'Wszystkie prezenty są już zajęte. Przełącz na „Wszystkie”, żeby zobaczyć pełną listę.' }) : empty);
+      };
+      const filter = !own && data.wishes.some(w => w.reserved && !w.reservedByMe)
+        ? filterControl([{ value: 'all', label: 'Wszystkie' }, { value: 'free', label: 'Dostępne' }],
+          getFilter, value => { disclosureState.set(filterKey, value === 'free'); fill(); }, member.id) : null;
+      fill();
+      content.replaceChildren(...[
+        data.member.letter.trim() ? h('p', { class: 'person-fold__letter', text: capFirst(data.member.letter) })
+          : h('p', { class: 'muted', text: own ? 'Jeszcze nie masz listu do Mikołaja.' : 'List do Mikołaja jeszcze się pisze.' }),
+        own ? h('a', { class: 'text-link', href: '#/moje' }, 'Edytuj w Moje', icon('arrow-right', 'icon icon--sm')) : null,
+        !own && data.wishes.length ? h('p', { class: 'page-note', text: 'Autor nie widzi rezerwacji ani tego, kto kupuje prezent.' }) : null,
+        filter,
+        slot].filter(Boolean));
+    } catch (err) {
+      if (!row.isConnected || state.me?.user.id !== viewerId || err?.status === 401) return;
+      const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, 'Spróbuj ponownie');
+      retry.addEventListener('click', load);
+      content.replaceChildren(h('p', { role: 'alert', text: messageOf(err) }), retry);
+    } finally {
+      loading = false;
+      content.removeAttribute('aria-busy');
+    }
+  };
+  row.addEventListener('toggle', () => { if (row.open) load(); });
+  queueMicrotask(() => { if (row.isConnected && row.open) load(); });
+  return row;
 }
 
 // ---------- List: treść ----------
@@ -1120,17 +1183,37 @@ function letterBody(text) {
 
 // ---------- Mój list ----------
 
+function viewMy({ mine, reservations }) {
+  const jump = h('button', { type: 'button', class: 'text-link', 'data-fkey': 'jump-reservations' },
+    'Moje rezerwacje', h('span', { class: 'section-count', text: String(reservations.length) }), icon('arrow-right', 'icon icon--sm'));
+  jump.addEventListener('click', () => {
+    const target = d.getElementById('my-reservations-h');
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: 'start', behavior: reduceMotion() ? 'instant' : 'smooth' });
+  });
+  const head = pageHead({ title: 'Moje', action: jump });
+  head.classList.add('page-head--mine');
+  return h('div', { class: 'page page--narrow container' },
+    head,
+    viewMine(mine),
+    viewReservations(reservations),
+    !DEMO && state.me.user.isAdmin ? h('p', { class: 'page-foot' }, h('a', { class: 'text-link', href: '#/zaproszenie' }, 'Zaproś bliskich')) : null);
+}
+
 function viewMine({ member, wishes }) {
   const editor = state.editingLetter && letterNode ? letterNode : (letterNode = letterEditor(member.letter));
   const list = wishes.length
     ? h('ul', { class: 'wishes', role: 'list' }, wishes.map(w => h('li', null, ownWishCard(w))))
-    : h('p', { class: 'empty__text', text: 'Lista jest pusta. Życzenie może być konkretne — z linkiem i ceną — albo ogólne, np. „dobra książka o górach”.' });
+    : h('div', { class: 'empty', 'data-empty': 'my-wishes' },
+      h('p', { class: 'empty__text', text: 'Nie masz jeszcze życzeń. Dodaj coś, co ucieszy Cię pod choinką — z linkiem lub bez.' }),
+      addWishButton('empty-add-wish'));
 
-  return h('div', { class: 'page page--narrow container' },
-    pageHead({ title: 'Mój list', meta: quiet('eye-off', 'Rodzina widzi Twój list. Rezerwacji tu nie zobaczysz.') }),
+  return h('section', { class: 'my-section', id: 'my-list', 'aria-labelledby': 'my-list-h' },
+    h('h2', { class: 'section-title my-section__title', id: 'my-list-h', text: 'Mój list' }),
+    h('p', { class: 'page-note', text: 'Rodzina widzi ten list i życzenia. Nie zobaczysz, co ktoś dla Ciebie rezerwuje.' }),
     editor,
     h('section', { class: 'section', 'aria-labelledby': 'wishes-h' },
-      sectionHead('wishes-h', 'Życzenia', wishes.length, addWishButton('add-wish')),
+      sectionHead('wishes-h', 'Moje życzenia', wishes.length, wishes.length ? addWishButton('add-wish') : null, 'h3'),
       list));
 }
 
@@ -1218,15 +1301,21 @@ function letterEditor(initialText) {
 
 function wishCardBase(w, extraClass = '') {
   const titleId = uid('w');
-  return h('article', { class: `wish${extraClass ? ` ${extraClass}` : ''}`, 'aria-labelledby': titleId },
-    h('div', { class: 'wish__head' },
+  const hasReservation = Object.hasOwn(w, 'reserved') || extraClass.includes('wish--mine');
+  const status = !hasReservation ? null : w.reservedByMe || extraClass.includes('wish--mine')
+    ? (w.purchased ? 'Kupione' : 'Twoja rezerwacja') : w.reserved ? (w.purchased ? 'Kupione' : 'Zajęte') : 'Dostępny';
+  return rememberDisclosure(h('details', { class: `wish${extraClass ? ` ${extraClass}` : ''}`, 'aria-labelledby': titleId, 'data-wish-id': w.id },
+    h('summary', { class: 'wish__summary', 'data-fkey': `wish-${w.id}` },
+      h('span', { class: 'wish__head' },
       h('h3', { class: 'wish__title', id: titleId, text: w.title }),
-      w.price !== null ? h('p', { class: 'wish__price' }, h('span', { class: 'sr-only', text: 'Cena: ' }), formatPrice(w.price)) : null),
+      w.price !== null ? h('span', { class: 'wish__price' }, h('span', { class: 'sr-only', text: 'Cena: ' }), formatPrice(w.price)) : null),
+      status ? h('span', { class: `tag ${status === 'Twoja rezerwacja' ? 'tag--accent' : 'tag--muted'}`, text: status }) : null,
+      icon('arrow-right', 'icon icon--sm disclosure-arrow')),
     w.note ? h('p', { class: 'wish__note', text: w.note }) : null,
     w.url ? h('a', { class: 'wish__link', href: w.url, target: '_blank', rel: 'noopener noreferrer' },
       h('span', { text: displayHost(w.url) }),
       icon('external', 'icon icon--xs'),
-      h('span', { class: 'sr-only', text: ' (otwiera się w nowej karcie)' })) : null);
+      h('span', { class: 'sr-only', text: ' (otwiera się w nowej karcie)' })) : null), `wish:${w.ownerId}:${w.id}`);
 }
 
 function ownWishCard(w) {
@@ -1304,66 +1393,16 @@ function openWishDialog(existing) {
 
 // ---------- List innej osoby ----------
 
-function filterControl(options, get, set) {
+function filterControl(options, get, set, scope = '') {
   const group = h('div', { class: 'segmented segmented--sm', role: 'group', 'aria-label': 'Pokaż życzenia' });
   const sync = () => { for (const b of group.children) b.setAttribute('aria-pressed', String(b.value === get())); };
   for (const o of options) {
-    const b = h('button', { type: 'button', class: 'segmented__btn', value: o.value, 'data-fkey': `filter-${o.value}` }, o.label);
+    const b = h('button', { type: 'button', class: 'segmented__btn', value: o.value, 'data-fkey': `filter-${scope ? `${scope}-` : ''}${o.value}` }, o.label);
     b.addEventListener('click', () => { if (get() !== o.value) { set(o.value); sync(); } });
     group.append(b);
   }
   sync();
   return group;
-}
-
-function memberLetter(member) {
-  const disclosure = h('details', {
-    class: 'letter letter--fold',
-    open: letterDisclosureState.get(member.id) ?? matchMedia('(min-width: 801px)').matches,
-  },
-  h('summary', { class: 'letter__summary', 'data-fkey': 'member-letter' },
-    h('h2', { class: 'section-title', text: 'List' }),
-    h('span', { class: 'letter__read', text: 'Przeczytaj' }),
-    icon('arrow-right', 'icon icon--sm')),
-  h('div', { class: 'letter__body' },
-    h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
-    h('p', { class: 'letter__text', text: member.letter })));
-  disclosure.addEventListener('toggle', () => {
-    if (disclosure.isConnected) letterDisclosureState.set(member.id, disclosure.open);
-  });
-  return disclosure;
-}
-
-function viewMember({ member, wishes }) {
-  const free = wishes.filter(w => !w.reserved).length;
-  const takenByOthers = wishes.filter(w => w.reserved && !w.reservedByMe).length;
-  const hasLetter = member.letter.trim().length > 0;
-
-  // „Dostępne” ukrywa tylko prezenty zajęte przez innych; Twoje rezerwacje zostają widoczne.
-  const slot = h('div', { class: 'wishes-slot' });
-  const fill = () => {
-    const items = state.memberFilter === 'free' ? wishes.filter(w => !w.reserved || w.reservedByMe) : wishes;
-    slot.replaceChildren(items.length
-      ? h('ul', { class: 'wishes', role: 'list' }, items.map(w => h('li', null, otherWishCard(w))))
-      : h('p', { class: 'empty__text', text: wishes.length ? 'Wszystko z tej listy jest już zajęte.' : 'Na tej liście nie ma jeszcze życzeń.' }));
-  };
-  fill();
-  const filter = takenByOthers
-    ? filterControl([{ value: 'all', label: 'Wszystkie' }, { value: 'free', label: 'Dostępne' }],
-      () => state.memberFilter, v => { state.memberFilter = v; fill(); })
-    : null;
-
-  return h('div', { class: 'page page--narrow container' },
-    pageHead({
-      back: h('a', { class: 'back-link', href: '#/' }, icon('arrow-left', 'icon icon--sm'), 'Listy bliskich'),
-      title: member.name,
-      meta: wishes.length ? `${count(wishes.length, FORMS.wish)} · wolne: ${free}` : 'Brak życzeń',
-      note: quiet('lock', `${member.name} nie widzi rezerwacji. Nie pokazujemy też, kto co zarezerwował.`),
-    }),
-    hasLetter ? memberLetter(member) : null,
-    h('section', { class: 'section', 'aria-labelledby': 'wishes-h' },
-      sectionHead('wishes-h', 'Życzenia', wishes.length, filter),
-      slot));
 }
 
 function purchasedToggle(w) {
@@ -1425,30 +1464,30 @@ function otherWishCard(w) {
     const card = wishCardBase(w, 'wish--mine');
     if (changed) {
       card.append(changedNote('Zmienione po Twojej rezerwacji. Wersja z chwili rezerwacji i status zakupu są w zakładce',
-        h('a', { class: 'text-link text-link--inline', href: '#/rezerwacje' }, 'Prezenty')));
+        h('a', { class: 'text-link text-link--inline', href: '#/moje' }, 'Moje rezerwacje')));
     }
     card.append(h('div', { class: 'wish__foot' },
-      h('span', { class: 'tag tag--accent wish__status', text: 'Twoja rezerwacja' }),
       changed ? null : purchasedToggle(w),
       cancelReservationButton(w)));
     return card;
   }
-  const card = wishCardBase(w, 'wish--taken');
-  card.append(h('div', { class: 'wish__foot' },
-    h('span', { class: 'tag tag--muted wish__status', text: w.purchased ? 'Kupione' : 'Zajęte' })));
-  return card;
+  return wishCardBase(w, 'wish--taken');
 }
 
 // ---------- Moje prezenty ----------
 
 function viewReservations(wishes) {
   const note = quiet('lock', 'Inni widzą tylko, że prezent jest zajęty — nie wiedzą, przez kogo.');
+  const heading = meta => h('header', { class: 'my-section__head' },
+    h('h2', { class: 'section-title', id: 'my-reservations-h', tabindex: '-1', text: 'Moje rezerwacje' }),
+    meta ? h('p', { class: 'page-meta', text: meta }) : null,
+    h('p', { class: 'page-note' }, note));
   if (!wishes.length) {
-    return h('div', { class: 'page page--narrow container' },
-      pageHead({ title: 'Moje prezenty', note }),
-      h('div', { class: 'empty' },
+    return h('section', { class: 'my-section', id: 'my-reservations', 'aria-labelledby': 'my-reservations-h' },
+      heading(null),
+      h('div', { class: 'empty', 'data-empty': 'reservations' },
         h('p', { class: 'empty__text', text: 'Nie masz jeszcze rezerwacji. Otwórz listę bliskiej osoby i wybierz prezent.' }),
-        h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Listy bliskich')));
+        h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Przejrzyj listy')));
   }
 
   const bought = wishes.filter(w => w.purchased).length;
@@ -1473,8 +1512,8 @@ function viewReservations(wishes) {
       h('ul', { class: 'wishes', role: 'list' }, g.items.map(w => h('li', null, reservedWishCard(w)))));
   });
 
-  return h('div', { class: 'page page--narrow container' },
-    pageHead({ title: 'Moje prezenty', meta, note }),
+  return h('section', { class: 'my-section', id: 'my-reservations', 'aria-labelledby': 'my-reservations-h' },
+    heading(meta),
     sections);
 }
 
@@ -1789,6 +1828,8 @@ function confirmDemoReset() {
     confirmLabel: 'Przywróć',
     action: async () => {
       resetDemo();
+      for (const node of mainEl().querySelectorAll('details[data-disclosure]')) node.open = false;
+      disclosureState.clear();
       await showDemoPerson(() => 'Przywrócono dane przykładowe.');
     },
   });
