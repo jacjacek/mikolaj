@@ -1759,7 +1759,7 @@ function mountDemoTools(status) {
     icon('refresh', 'icon icon--sm'), 'Przywróć dane przykładowe');
   const menu = h('details', { class: 'demo__menu' }, summary,
     h('div', { class: 'demo__panel' },
-      h('p', { class: 'demo__title', text: 'Podgląd bez logowania' }),
+      h('p', { class: 'demo__title', text: 'Podgląd rodzinnych listów' }),
       note,
       reset));
   reset.addEventListener('click', () => { menu.open = false; summary.focus(); confirmDemoReset(); });
