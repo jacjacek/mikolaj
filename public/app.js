@@ -1,1895 +1,565 @@
-/* Mikołaj — rodzinne listy życzeń.
-   Moduł ES bez zależności. Dane użytkowników trafiają do DOM wyłącznie
-   przez textContent, .value lub setAttribute — nigdy przez innerHTML. */
+/* Mikołaj — rodzinne listy do Mikołaja. Moduł bez zależności.
+   Dane użytkowników trafiają do HTML wyłącznie przez esc(). */
 
-import { DEMO, DemoError, initDemo, demoRequest, demoPeople, demoActiveId, setDemoActive, resetDemo, onDemoStatus } from './demo.js';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pl = (n, one, few, many) => n === 1 ? one : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? few : many;
+const host = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const daysToEve = () => { const n = new Date(); n.setHours(0, 0, 0, 0); let e = new Date(n.getFullYear(), 11, 24); if (n > e) e = new Date(n.getFullYear() + 1, 11, 24); return Math.round((e - n) / 864e5); };
 
-const d = document;
+// przedziały budżetowe — od najtańszego; porządkują listy
+const TIERS = [
+  { id: 'small', name: 'Drobnostki', range: 'do 50 zł' },
+  { id: 'ok', name: 'Nie było niegrzecznie', range: '50–200 zł' },
+  { id: 'good', name: 'To był grzeczny rok', range: '200–300 zł' },
+  { id: 'angel', name: 'Byłem aniołkiem', range: 'bez limitu' },
+];
+const tier = id => TIERS.find(t => t.id === id) || TIERS[1];
+const tierIx = w => TIERS.findIndex(t => t.id === w.tier);
+const byTier = (list, render) => list.slice().sort((a, b) => tierIx(a) - tierIx(b)).map(render).join('');
+const range = w => `<span class="st">${tier(w.tier).range}</span>`;
 
-// ---------- Stałe i formatowanie ----------
-
-const LIMITS = Object.freeze({
-  title: 160, note: 1500, url: 2000, letter: 4000,
-  name: 60, family: 80, email: 254, passwordMin: 10, passwordMax: 256,
-});
-
-const FORMS = Object.freeze({
-  wish: ['życzenie', 'życzenia', 'życzeń'],
-  person: ['osoba', 'osoby', 'osób'],
-  gift: ['prezent', 'prezenty', 'prezentów'],
-  char: ['znak', 'znaki', 'znaków'],
-});
-
-const UNEXPECTED = 'Serwer zwrócił nieoczekiwaną odpowiedź. Odśwież stronę albo spróbuj ponownie za chwilę.';
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const INVITE_RE = /^[a-f0-9]{64}$/;
-
-const fmtWhole = new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', maximumFractionDigits: 0 });
-const fmtCents = new Intl.NumberFormat('pl-PL', { style: 'currency', currency: 'PLN', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const formatPrice = n => (Number.isInteger(n) ? fmtWhole : fmtCents).format(n);
-
-function plural(n, [one, few, many]) {
-  if (n === 1) return one;
-  const a = n % 10, b = n % 100;
-  return a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many;
-}
-const count = (n, forms) => `${n} ${plural(n, forms)}`;
-
-const firstName = name => name.trim().split(/\s+/)[0] || name;
-const capFirst = t => (t ? t.charAt(0).toLocaleUpperCase('pl-PL') + t.slice(1) : t);
-function snippet(text, max = 120) {
-  const t = text.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
-}
-
-function safeHttpUrl(value) {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const u = new URL(value.trim());
-    if ((u.protocol !== 'http:' && u.protocol !== 'https:') || !u.hostname || u.username || u.password) return null;
-    return u.href;
-  } catch { return null; }
-}
-function displayHost(href) {
-  try { return new URL(href).hostname.replace(/^www\./, ''); } catch { return href; }
-}
-
-const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-// ---------- DOM ----------
-
-let uidSeq = 0;
-const uid = (prefix = 'id') => `${prefix}-${++uidSeq}`;
-const $ = (sel, root = d) => root.querySelector(sel);
-const mainEl = () => d.getElementById('main');
-
-function h(tag, props, ...children) {
-  const el = d.createElement(tag);
-  if (props) {
-    for (const [key, value] of Object.entries(props)) {
-      if (value === null || value === undefined || value === false) continue;
-      if (key === 'class') el.className = value;
-      else if (key === 'text') el.textContent = value;
-      else if (key === 'value') el.value = value;
-      else if (key.startsWith('on') && typeof value === 'function') el.addEventListener(key.slice(2), value);
-      else if (value === true) el.setAttribute(key, '');
-      else el.setAttribute(key, String(value));
-    }
-  }
-  for (const child of children.flat(Infinity)) {
-    if (child === null || child === undefined || child === false) continue;
-    el.append(child instanceof Node ? child : String(child));
-  }
-  return el;
-}
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
-function icon(name, cls = 'icon') {
-  const svg = d.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('class', cls);
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-  const use = d.createElementNS(SVG_NS, 'use');
-  use.setAttribute('href', `#i-${name}`);
-  svg.append(use);
-  return svg;
-}
-
-function setBusy(btn, on) {
-  if (!btn) return;
-  btn.disabled = on;
-  btn.classList.toggle('is-busy', on);
-  if (on) btn.setAttribute('aria-busy', 'true');
-  else btn.removeAttribute('aria-busy');
-}
-
-function focusHeading() {
-  const target = $('h1', mainEl()) || mainEl();
-  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
-  target.focus({ preventScroll: true });
-}
-
-function restoreFocus(el) {
-  if (el && el !== d.body && el.isConnected && typeof el.focus === 'function') { el.focus(); return; }
-  const key = el?.dataset?.fkey;
-  if (key) {
-    const next = d.querySelector(`[data-fkey="${CSS.escape(key)}"]`);
-    if (next) { next.focus(); return; }
-  }
-  focusHeading();
-}
-
-// ---------- API ----------
-
-class ApiError extends Error {
-  constructor(message, status = 0) { super(message); this.name = 'ApiError'; this.status = status; }
-}
-const bad = () => new ApiError(UNEXPECTED);
-const messageOf = err => (err instanceof ApiError ? err.message : 'Coś poszło nie tak. Spróbuj ponownie.');
-
-function statusMessage(status) {
-  if (status === 400) return 'Nie udało się — sprawdź wpisane dane.';
-  if (status === 401) return 'Sesja wygasła. Zaloguj się ponownie.';
-  if (status === 403) return 'Nie masz do tego uprawnień.';
-  if (status === 404) return 'Nie znaleziono — mogło zostać usunięte.';
-  if (status === 409) return 'Dane zmieniły się w międzyczasie. Odświeżamy widok.';
-  if (status === 429) return 'Zbyt wiele prób. Odczekaj chwilę i spróbuj ponownie.';
-  if (status >= 500) return 'Serwer ma chwilowy kłopot. Spróbuj ponownie za chwilę.';
-  return 'Coś poszło nie tak. Spróbuj ponownie.';
-}
-
-let inflight = 0;
-
-async function api(method, path, body) {
-  if (DEMO) {
-    // Podgląd UX: lokalne dane przykładowe, bez żadnego żądania do serwera.
-    inflight++;
-    try {
-      const data = await demoRequest(method, path, body);
-      if (!isObj(data)) throw new ApiError(UNEXPECTED);
-      return data;
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      if (err instanceof DemoError) throw new ApiError(err.message || statusMessage(err.status), err.status);
-      throw new ApiError('Podgląd napotkał błąd. Odśwież stronę albo przywróć dane przykładowe.');
-    } finally {
-      inflight--;
-    }
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
-  const init = {
-    method,
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: { Accept: 'application/json' },
-    signal: ctrl.signal,
-  };
-  if (body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
-  }
-  inflight++;
-  try {
-    let res;
-    try { res = await fetch(path, init); }
-    catch {
-      throw new ApiError(ctrl.signal.aborted
-        ? 'Serwer odpowiada zbyt długo. Spróbuj ponownie za chwilę.'
-        : 'Brak połączenia z serwerem. Sprawdź internet i spróbuj ponownie.');
-    }
-    let data = null;
-    try { const raw = await res.text(); data = raw ? JSON.parse(raw) : null; } catch { data = null; }
-    if (!res.ok) {
-      const msg = isObj(data) && isStr(data.error) && data.error.trim() ? data.error.trim().slice(0, 400) : statusMessage(res.status);
-      if (res.status === 401 && state.me) queueMicrotask(() => sessionExpired());
-      throw new ApiError(msg, res.status);
-    }
-    if (!isObj(data)) throw new ApiError(UNEXPECTED, res.status);
-    return data;
-  } finally {
-    clearTimeout(timer);
-    inflight--;
-  }
-}
-
-// ---------- Walidacja odpowiedzi ----------
-
-const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isStr = v => typeof v === 'string';
-const isId = v => (isStr(v) && v.length > 0 && v.length <= 128) || Number.isSafeInteger(v);
-const str = v => (isStr(v) ? v : '');
-
-function toPrice(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : (isStr(v) ? Number(v.replace(',', '.')) : NaN);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
-}
-
-function normSession(data) {
-  if (!isObj(data)) throw bad();
-  if (data.user === null) return null;
-  const { user, family, members } = data;
-  if (!isObj(user) || !isId(user.id) || !isStr(user.name) || !isObj(family) || !isId(family.id) || !isStr(family.name) || !Array.isArray(members)) throw bad();
-  return {
-    user: { id: String(user.id), name: user.name.trim() || 'Ty', email: str(user.email), isAdmin: user.isAdmin === true },
-    family: { id: String(family.id), name: family.name.trim() || 'Rodzina' },
-    members: members
-      .filter(m => isObj(m) && isId(m.id) && isStr(m.name))
-      .map(m => ({
-        id: String(m.id),
-        name: m.name.trim() || 'Bez imienia',
-        letter: str(m.letter),
-        wishCount: Number.isSafeInteger(m.wishCount) && m.wishCount >= 0 ? m.wishCount : 0,
-      })),
-  };
-}
-
-function normWish(w, own) {
-  if (!isObj(w) || !isId(w.id) || !isStr(w.title)) return null;
-  const wish = {
-    id: String(w.id),
-    ownerId: isId(w.ownerId) ? String(w.ownerId) : '',
-    title: w.title.trim() || 'Bez nazwy',
-    note: str(w.note).trim(),
-    url: safeHttpUrl(w.url),
-    price: toPrice(w.price),
-  };
-  // Na własnej liście nigdy nie przenosimy pól rezerwacji — nawet gdyby serwer je przysłał.
-  if (!own) {
-    wish.reservedByMe = w.reservedByMe === true;
-    wish.reserved = w.reserved === true || wish.reservedByMe;
-    wish.purchased = w.purchased === true && wish.reserved;
-    if (wish.reservedByMe) wish.changedSinceReservation = w.changedSinceReservation === true;
-  }
-  return wish;
-}
-
-function normMemberWishes(data, myId) {
-  if (!isObj(data) || !isObj(data.member) || !isId(data.member.id) || !isStr(data.member.name) || !Array.isArray(data.wishes)) throw bad();
-  const memberId = String(data.member.id);
-  const own = memberId === myId;
-  return {
-    own,
-    member: { id: memberId, name: data.member.name.trim() || 'Bez imienia', letter: str(data.member.letter) },
-    wishes: data.wishes
-      .map(w => normWish(w, own || (isObj(w) && isId(w.ownerId) && String(w.ownerId) === myId)))
-      .filter(Boolean),
-  };
-}
-
-function normReservations(data) {
-  if (!isObj(data) || !Array.isArray(data.wishes)) throw bad();
-  return data.wishes
-    .filter(w => isObj(w) && isId(w.id) && isStr(w.title))
-    .map(w => ({
-      id: String(w.id),
-      ownerId: isId(w.ownerId) ? String(w.ownerId) : '',
-      ownerName: isStr(w.ownerName) && w.ownerName.trim() ? w.ownerName.trim() : 'Ktoś z rodziny',
-      title: w.title.trim() || 'Bez nazwy',
-      note: str(w.note).trim(),
-      url: safeHttpUrl(w.url),
-      price: toPrice(w.price),
-      purchased: w.purchased === true,
-      changedSinceReservation: w.changedSinceReservation === true,
-    }));
-}
-
-function normInviteUrl(data) {
-  const url = isObj(data) ? safeHttpUrl(data.url) : null;
-  if (!url) throw bad();
-  return url;
-}
-
-// ---------- Stan ----------
-
-const freshAuth = () => ({ mode: 'login', invitation: { status: 'idle', familyName: '' }, notice: null, brokenLink: false });
-
-const state = {
-  me: null,
-  tokens: { setup: null, invite: null },
-  auth: freshAuth(),
-  pendingLink: null,
-  inviteUrl: null,
-  editingLetter: false,
-  letterDirty: false,
-
-  lastVisibleRefresh: 0,
-  booting: true,
-  appHash: '',
+/* ===================== STAN ===================== */
+const S = {
+  data: null, admin: null, token: null,
+  screen: 'lists',            // lists | mine | family | login | join | link
+  open: new Set(),            // rozwinięte sekcje
+  filter: {}, editWish: null, adding: null, editLetter: null, addingPerson: false,
+  menu: false, fam: null, famView: 'for', confirm: null, info: null,
 };
-let letterNode = null;
-const disclosureState = new Map();
+let theme = 'auto';
+try { theme = localStorage.getItem('mikolaj.theme') || 'auto'; } catch {}
 
-function rememberDisclosure(node, key) {
-  const scopedKey = `${state.me.user.id}:${key}`;
-  node.dataset.disclosure = scopedKey;
-  node.open = disclosureState.get(scopedKey) === true;
-  node.addEventListener('toggle', () => {
-    if (node.isConnected) disclosureState.set(scopedKey, node.open);
-  });
-  return node;
-}
+const me = () => S.data.user;
+const member = id => S.data.members.find(m => m.id === id);
+const wish = id => S.data.wishes.find(w => w.id === id);
+const wishesOf = id => S.data.wishes.filter(w => w.ownerId === id);
+const managedBy = id => S.data.members.filter(m => m.managedBy === id);
+const myRes = () => S.data.wishes.filter(w => w.taken === 'me');
+const status = w => !w.taken ? 'free' : w.taken === 'me' ? 'mine' : 'taken';
+const secKey = (kind, owner) => owner === me().id ? `s:${kind}` : `s:${kind}:${owner}`;
 
-function saveDisclosures() {
-  for (const node of mainEl().querySelectorAll('details[data-disclosure]')) {
-    disclosureState.set(node.dataset.disclosure, node.open);
+/* ===================== API ===================== */
+async function api(path, method = 'GET', body) {
+  const init = { method, credentials: 'same-origin', headers: {} };
+  if (method !== 'GET' && method !== 'DELETE') { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body || {}); }
+  let res, data = {};
+  try { res = await fetch('/api/' + path, init); data = await res.json(); }
+  catch { throw new Error('Brak połączenia. Spróbuj ponownie.'); }
+  if (!res.ok) {
+    if (res.status === 401 && S.data?.user) { S.data = null; go('login'); }
+    throw new Error(data.error || 'Coś poszło nie tak. Spróbuj ponownie.');
   }
+  return data;
+}
+async function refresh() {
+  S.data = await api('state');
+  S.admin = S.screen === 'family' && S.data.user?.isAdmin ? await api('admin') : null;
+}
+let busy = false;
+async function act(fn, msg, undo) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); await refresh(); render(); if (msg) toast(msg, undo); }
+  catch (e) { toast(e.message); }
+  finally { busy = false; }
+}
+async function copy(url, msg) {
+  try { await navigator.clipboard.writeText(url); toast(msg); }
+  catch { window.prompt('Skopiuj ten link:', url); }
 }
 
-// ---------- Fragment URL: #setup= / #invite= ----------
-
-function readLinkFragment() {
-  const raw = location.hash.slice(1);
-  if (!raw || raw.startsWith('/')) return null;
-  const params = new URLSearchParams(raw);
-  const invite = params.get('invite');
-  if (invite !== null) {
-    const token = invite.trim().toLowerCase();
-    return { kind: 'invite', token: INVITE_RE.test(token) ? token : null };
-  }
-  const setup = params.get('setup');
-  if (setup !== null) {
-    const token = setup.trim();
-    return { kind: 'setup', token: /^\S{1,512}$/.test(token) ? token : null };
-  }
-  return null;
+/* ===================== WIDOKI ===================== */
+function fold(key, cls, head, body) {
+  const open = S.open.has(key);
+  return `<div class="fold ${cls} ${open ? 'open' : ''}" data-fold="${key}">
+    <div class="fold-head">${head}<button class="toggle" data-toggle="${key}" aria-expanded="${open}">Zwiń</button></div>
+    <div class="peek"><div class="peek-inner">${body}</div></div>
+    <button class="more" data-toggle="${key}" aria-expanded="${open}">Rozwiń</button>
+  </div>`;
 }
 
-function applyLink(link) {
-  state.tokens = { setup: null, invite: null };
-  state.auth = freshAuth();
-  if (!link) return;
-  if (!link.token) { state.auth.brokenLink = true; return; }
-  state.tokens[link.kind] = link.token;
-  state.auth.mode = link.kind === 'invite' ? 'join' : 'create';
+function vHead() {
+  const tab = (s, label) => `<button data-go="${s}" ${S.screen === s ? 'aria-current="page"' : ''}>${label}</button>`;
+  return `<header class="head">
+    <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
+    <button class="who" data-act="menu" aria-expanded="${S.menu}">${esc(me().name)}</button>
+  </header>
+  <div class="menu ${S.menu ? 'open' : ''}"><div>
+    <button data-act="theme">Motyw: ${{ auto: 'auto', light: 'jasny', dark: 'ciemny' }[theme]}</button>
+    <button data-act="logout">Wyloguj</button>
+  </div></div>`;
 }
 
-function clearFragment() {
-  history.replaceState(null, '', location.pathname + location.search);
+function vGift(w) {
+  const st = status(w);
+  let row;
+  if (st === 'free') row = `<button class="a solid" data-act="reserve" data-id="${w.id}">Kupię to</button>`;
+  else if (st === 'mine') row = `<span class="st">${w.purchased ? 'Kupione przez Ciebie' : 'Ty to kupujesz'}</span>
+    <button class="a quiet" data-act="${w.purchased ? 'buy' : 'cancel'}" data-id="${w.id}">${w.purchased ? 'cofnij' : 'rezygnuję'}</button>`;
+  else row = `<span class="st">${w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
+  return `<div class="gift ${st === 'free' ? '' : 'taken'}">
+    <span class="t">${esc(w.title)}</span>
+    ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
+    ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
+    <div class="row">${row}${range(w)}${w.url ? `<a class="a quiet" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</div>
+  </div>`;
 }
 
-// ---------- Powiadomienia ----------
-
-function toast(message, { tone = 'info' } = {}) {
-  const region = d.getElementById(tone === 'error' ? 'toast-alert' : 'toast-status');
-  if (!region) return;
-  const close = h('button', { type: 'button', class: 'icon-btn toast__close', 'aria-label': 'Zamknij powiadomienie' }, icon('x', 'icon icon--sm'));
-  const el = h('div', { class: `toast toast--${tone}` },
-    icon(tone === 'error' ? 'alert' : tone === 'success' ? 'check' : 'info'),
-    h('p', { class: 'toast__text', text: message }),
-    close);
-  let timer = 0;
-  const remove = () => {
-    clearTimeout(timer);
-    if (!el.isConnected) return;
-    el.classList.add('is-leaving');
-    setTimeout(() => el.remove(), reduceMotion() ? 0 : 200);
-  };
-  const arm = ms => { clearTimeout(timer); timer = setTimeout(remove, ms); };
-  close.addEventListener('click', remove);
-  el.addEventListener('mouseenter', () => clearTimeout(timer));
-  el.addEventListener('mouseleave', () => arm(2500));
-  el.addEventListener('focusin', () => clearTimeout(timer));
-  region.append(el);
-  while (region.children.length > 3) region.firstElementChild.remove();
-  arm(tone === 'error' ? 9000 : 4800);
+function vLists() {
+  const others = S.data.members.filter(m => m.id !== me().id);
+  const d = daysToEve();
+  const mine = member(me().id);
+  const missing = !mine.letter ? 'listu' : !wishesOf(mine.id).length ? 'życzeń' : '';
+  const order = { mine: 0, free: 1, taken: 2 };
+  return `${vHead()}<section class="fade">
+    <div class="title-row"><h1 class="title">Listy</h1>
+      ${others.length ? `<button class="a" data-act="toggle-all">Rozwiń wszystkie</button>` : ''}</div>
+    <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
+    ${missing ? `<p class="nudge">Nie masz jeszcze ${missing}. <button data-go="mine">${missing === 'listu' ? 'Napisz' : 'Dodaj'}</button></p>` : ''}
+    <div class="people">
+    ${others.length ? others.map(p => {
+      const ws = wishesOf(p.id);
+      const free = ws.filter(w => !w.taken);
+      const f = S.filter[p.id] || 'all';
+      const shown = (f === 'free' ? free : ws).slice().sort((a, b) => order[status(a)] - order[status(b)]);
+      const by = p.managedBy ? (p.managedBy === me().id ? 'list prowadzisz Ty' : `list prowadzi ${esc(member(p.managedBy)?.name)}`) : '';
+      const head = `<button class="name" data-toggle="p:${p.id}">${esc(p.name)}${by ? `<small>${by}</small>` : ''}</button>
+        <span class="count">${ws.length ? `${free.length} z ${ws.length} wolne` : 'pusto'}</span>`;
+      const body = `
+        ${p.letter ? `<p class="letter">Drogi Mikołaju, ${esc(p.letter)}</p>` : ''}
+        ${ws.length ? `
+          ${free.length !== ws.length ? `<div class="filter">
+            <button data-filter="all" data-pid="${p.id}" aria-pressed="${f === 'all'}">wszystkie</button>
+            <button data-filter="free" data-pid="${p.id}" aria-pressed="${f === 'free'}">tylko wolne</button>
+          </div>` : ''}
+          ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
+        ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
+        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a" data-go="mine">Zmień list i życzenia</button></div>` : ''}`;
+      return fold('p:' + p.id, 'person', head, body);
+    }).join('') : '<p class="empty">Nikogo tu jeszcze nie ma. Organizator może wysłać zaproszenie.</p>'}
+    </div>
+  </section>`;
 }
 
-// ---------- Okna dialogowe ----------
+function wishForm(w, isNew) {
+  return `<div class="form">
+    <input class="in" id="f-title" value="${esc(w.title)}" placeholder="Co chcesz dostać?" maxlength="160">
+    <textarea class="in" id="f-note" placeholder="Wskazówki — rozmiar, kolor, marka" maxlength="1500">${esc(w.note)}</textarea>
+    <select class="in" id="f-tier" aria-label="Budżet" required>
+      <option value="" disabled ${w.tier ? '' : 'selected'}>Ile może kosztować?</option>
+      ${TIERS.map(t => `<option value="${t.id}" ${w.tier === t.id ? 'selected' : ''}>${t.name} — ${t.range}</option>`).join('')}
+    </select>
+    <input class="in" id="f-url" value="${esc(w.url)}" placeholder="Link (opcjonalnie)" maxlength="2000" inputmode="url">
+    <div class="actions">
+      <button class="a solid" data-act="save-wish" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">${isNew ? 'Dodaj' : 'Zapisz'}</button>
+      <button class="a quiet" data-act="close-edit">Anuluj</button>
+      ${isNew ? '' : `<button class="a quiet push" data-act="delete-wish" data-id="${w.id}">Usuń</button>`}
+    </div>
+    ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Usunąć to życzenie? Jeśli ktoś je już kupuje, rezerwacja też zniknie.', 'Usuń') : ''}
+  </div>`;
+}
+const confirmBox = (act, id, q, yes) => `<div class="confirm"><p>${q}</p><div class="actions">
+  <button class="a solid" data-act="${act}" data-id="${id || ''}" data-sure="1">${yes}</button><button class="a quiet" data-act="confirm-cancel">Anuluj</button></div></div>`;
 
-function openDialog({ title, body, initialFocus, size }) {
-  const opener = d.activeElement;
-  const titleId = uid('dlg');
-  const closeBtn = h('button', { type: 'button', class: 'icon-btn dialog__close', 'aria-label': 'Zamknij okno' }, icon('x'));
-  const dlg = h('dialog', { class: `dialog${size ? ` dialog--${size}` : ''}`, 'aria-labelledby': titleId },
-    h('div', { class: 'dialog__head' }, h('h2', { class: 'dialog__title', id: titleId, text: title }), closeBtn),
-    body);
-  let busy = false;
-  const ctl = {
-    el: dlg,
-    close() { if (dlg.open) dlg.close(); },
-    setBusy(on) { busy = on; closeBtn.disabled = on; },
-  };
-  dlg.addEventListener('cancel', e => { if (busy) e.preventDefault(); });
-  closeBtn.addEventListener('click', () => { if (!busy) ctl.close(); });
-  dlg.addEventListener('close', () => { dlg.remove(); restoreFocus(opener); });
-  d.body.append(dlg);
-  dlg.showModal();
-  const target = initialFocus?.() || dlg.querySelector('input, textarea, button:not(.dialog__close)');
-  target?.focus();
-  return ctl;
+// list + życzenia jednej osoby (mojej albo prowadzonej przeze mnie)
+function ownerBlocks(ownerId) {
+  const own = ownerId === me().id;
+  const m = member(ownerId);
+  const ws = wishesOf(ownerId);
+  const letterBody = S.editLetter === ownerId
+    ? `<div class="form"><label class="sr" for="f-letter">Treść listu</label>
+        <textarea class="in big" id="f-letter" maxlength="4000" placeholder="${own ? 'Drogi Mikołaju, w tym roku…' : `Napisz tak, jak ${esc(m.name)} by to powiedział(a)…`}">${esc(m.letter)}</textarea>
+        <div class="actions"><button class="a solid" data-act="save-letter" data-owner="${ownerId}">Zapisz</button><button class="a quiet" data-act="cancel-letter">Anuluj</button></div></div>`
+    : m.letter
+      ? `<p class="mine-letter"><span class="salut">Drogi Mikołaju,</span> ${esc(m.letter)}</p><div class="actions"><button class="a" data-act="edit-letter" data-owner="${ownerId}">Edytuj list</button></div>`
+      : `<p class="empty">${own ? 'Nie masz jeszcze listu. Kilka zdań o tym, co lubisz, a czego nie.' : `${esc(m.name)} nie ma jeszcze listu. Możesz go spisać z rozmowy.`}</p>
+         <div class="actions mt"><button class="a solid" data-act="edit-letter" data-owner="${ownerId}">Napisz list</button></div>`;
+  // opiekun nie jest obdarowanym, więc widzi, co już ktoś kupuje — żeby nie dopisywać dubli
+  const stLine = w => !w.taken ? '' : `<span class="st">${w.taken === 'me' ? 'Ty to kupujesz' : w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
+  const wishesBody = `
+    <p class="priv">${own ? 'Nie widzisz, co już ktoś dla Ciebie kupuje.' : 'Widzisz, co inni już kupili z tej listy. Nie zdradź niespodzianki.'}</p>
+    ${byTier(ws, w => S.editWish === w.id ? wishForm(w, false) : `<div class="gift">
+      <span class="t">${esc(w.title)}</span>
+      ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
+      <div class="row"><button class="a" data-edit="${w.id}">Zmień</button>${stLine(w)}${range(w)}${w.url ? `<span class="st">${esc(host(w.url))}</span>` : ''}</div>
+    </div>`)}
+    ${S.adding === ownerId ? wishForm({ title: '', note: '', url: '', tier: '', ownerId }, true)
+      : `<div class="actions mt"><button class="a solid" data-act="add" data-owner="${ownerId}">${ws.length ? 'Dodaj życzenie' : 'Dodaj pierwsze życzenie'}</button></div>`}`;
+  const label = own ? ['List', 'Życzenia'] : [`${esc(m.name)} · list`, `${esc(m.name)} · życzenia`];
+  return fold(secKey('letter', ownerId), 'sec', `<h2>${label[0]}</h2>`, letterBody)
+       + fold(secKey('wishes', ownerId), 'sec', `<h2>${label[1]}${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody);
 }
 
-function closeAllDialogs() {
-  for (const dlg of d.querySelectorAll('dialog[open]')) dlg.close();
+function vMine() {
+  const res = myRes();
+  const bought = res.filter(w => w.purchased).length;
+  const managed = managedBy(me().id);
+  const buyingBody = res.length ? res.map(w => `<div class="gift ${w.purchased ? 'done' : ''}">
+      <span class="t">${esc(w.title)}</span>
+      <span class="n">dla: ${esc(member(w.ownerId)?.name)} · ${tier(w.tier).range}</span>
+      ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
+      <div class="row">
+        <button class="a ${w.purchased ? 'quiet' : ''}" data-act="buy" data-id="${w.id}">${w.purchased ? 'cofnij zakup' : 'Oznacz jako kupione'}</button>
+        <button class="a quiet" data-act="cancel" data-id="${w.id}">rezygnuję</button>
+        ${w.url ? `<a class="a quiet" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}
+      </div>
+    </div>`).join('')
+    : `<p class="empty">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a" data-go="lists">Przejrzyj listy</button></div>`;
+  const buying = fold('s:buying', 'sec', `<h2>Kupuję${res.length ? ` · ${bought} z ${res.length} kupione` : ''}</h2>`, buyingBody);
+
+  const managedHtml = managed.map(m => `
+    <div class="managed">
+      <h2 class="managed-name">${esc(m.name)}</h2>
+      <p class="sub">Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.</p>
+      ${ownerBlocks(m.id)}
+      <div class="actions managed-actions">
+        <button class="a quiet" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
+        <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
+      </div>
+      ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}
+    </div>`).join('');
+
+  const addPerson = !me().canAdd ? '' : S.addingPerson
+    ? `<div class="add-person"><div class="form">
+        <input class="in" id="f-person" placeholder="Imię, np. Zosia albo Babcia Hela" maxlength="60">
+        <div class="actions"><button class="a solid" data-act="save-person">Dodaj osobę</button><button class="a quiet" data-act="cancel-person">Anuluj</button></div>
+      </div></div>`
+    : `<div class="add-person">
+        <p class="sub">Dziecko bez telefonu albo ktoś, kto nie chce korzystać z aplikacji? Dodaj tę osobę i wpisuj list oraz życzenia za nią.</p>
+        <div class="actions mt"><button class="a" data-act="add-person">Dodaj osobę</button></div>
+      </div>`;
+
+  // Kupuję na górze, gdy coś w niej jest; pusta sekcja ląduje na dole
+  return `${vHead()}<section class="fade">
+    <h1 class="title">${esc(me().name)}</h1>
+    <p class="sub">To, co kupujesz innym, Twój list i życzenia${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
+    ${res.length ? buying : ''}
+    ${ownerBlocks(me().id)}
+    ${managedHtml}
+    ${res.length ? '' : buying}
+    ${addPerson}
+  </section>`;
 }
 
-function formAlert() {
-  const el = h('div', { class: 'form-alert', role: 'alert' });
-  return {
-    el,
-    show(msg) { el.replaceChildren(h('div', { class: 'callout callout--error' }, icon('alert'), h('p', { text: msg }))); },
-    clear() { el.replaceChildren(); },
-  };
-}
-
-function confirmAction({ title, message, confirmLabel, tone = 'danger', action }) {
-  const alert = formAlert();
-  const cancel = h('button', { type: 'button', class: 'btn btn--secondary' }, 'Anuluj');
-  const ok = h('button', { type: 'button', class: `btn ${tone === 'danger' ? 'btn--danger' : 'btn--primary'}` }, confirmLabel);
-  const body = h('div', { class: 'dialog__body' },
-    h('p', { class: 'dialog__text', text: message }),
-    alert.el,
-    h('div', { class: 'dialog__actions' }, cancel, ok));
-  const dlg = openDialog({ title, body, size: 'sm', initialFocus: () => cancel });
-  cancel.addEventListener('click', () => dlg.close());
-  ok.addEventListener('click', async () => {
-    if (ok.disabled) return;
-    alert.clear();
-    dlg.setBusy(true); setBusy(ok, true); cancel.disabled = true;
-    try {
-      await action();
-      dlg.setBusy(false);
-      dlg.close();
-    } catch (err) {
-      if (err?.status === 401) return;
-      dlg.setBusy(false); setBusy(ok, false); cancel.disabled = false;
-      alert.show(messageOf(err));
-      ok.focus();
-    }
-  });
-}
-
-// ---------- Pola formularzy ----------
-
-function field({ label, name, type = 'text', multiline = false, rows = 4, value = '', hint, optional = false, required = false, maxlength, autocomplete, inputmode, placeholder, spellcheck, autocapitalize, trailing }) {
-  const id = uid('f');
-  const hintId = hint ? `${id}-hint` : null;
-  const errId = `${id}-err`;
-  const control = h(multiline ? 'textarea' : 'input', {
-    id, name,
-    class: 'input',
-    type: multiline ? null : type,
-    rows: multiline ? rows : null,
-    required,
-    maxlength, autocomplete, inputmode, placeholder, autocapitalize,
-    spellcheck: spellcheck === false ? 'false' : null,
-    'aria-describedby': [hintId, errId].filter(Boolean).join(' '),
-  });
-  control.value = value ?? '';
-  const hintEl = hint ? h('p', { id: hintId, class: 'field__hint', text: hint }) : null;
-  const err = h('p', { id: errId, class: 'field__error', hidden: true });
-  const wrap = h('div', { class: 'field' },
-    h('label', { class: 'field__label', for: id }, label, optional ? h('span', { class: 'field__optional', text: 'opcjonalnie' }) : null),
-    trailing ? h('div', { class: 'field__row' }, control, trailing) : control,
-    hintEl,
-    err);
-  return {
-    wrap, control, hintEl,
-    get value() { return control.value; },
-    setError(msg) {
-      err.replaceChildren(...(msg ? [icon('alert', 'icon icon--sm'), h('span', { text: msg })] : []));
-      err.hidden = !msg;
-      if (msg) control.setAttribute('aria-invalid', 'true');
-      else control.removeAttribute('aria-invalid');
-    },
-  };
-}
-
-function passwordField({ label, autocomplete, isNew = false }) {
-  const toggle = h('button', { type: 'button', class: 'icon-btn field__toggle', 'aria-label': 'Pokaż hasło', 'aria-pressed': 'false' }, icon('eye'));
-  const f = field({
-    label, name: 'password', type: 'password', autocomplete, required: true,
-    maxlength: LIMITS.passwordMax, spellcheck: false, autocapitalize: 'none', trailing: toggle,
-    hint: isNew ? `Co najmniej ${LIMITS.passwordMin} znaków. Najlepiej całe zdanie, którego nie używasz nigdzie indziej.` : null,
-  });
-  toggle.addEventListener('click', () => {
-    const show = f.control.type === 'password';
-    f.control.type = show ? 'text' : 'password';
-    toggle.setAttribute('aria-pressed', String(show));
-    toggle.replaceChildren(icon(show ? 'eye-off' : 'eye'));
-  });
-  if (isNew && f.hintEl) {
-    const base = f.hintEl.textContent;
-    f.control.addEventListener('input', () => {
-      const n = f.control.value.length;
-      const ok = n >= LIMITS.passwordMin;
-      f.hintEl.classList.toggle('is-ok', ok);
-      f.hintEl.textContent = n === 0 ? base : ok
-        ? 'Długość w porządku. Zapisz hasło w bezpiecznym miejscu.'
-        : `Jeszcze ${count(LIMITS.passwordMin - n, FORMS.char)} do minimum.`;
-    });
-  }
-  return f;
-}
-
-function bindSubmit({ form, button, alert, fields, validate, run, onBusy }) {
-  let busy = false;
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    if (busy) return;
-    alert.clear();
-    const values = {};
-    for (const [key, f] of Object.entries(fields)) values[key] = f.value;
-    const problems = validate(values) || {};
-    let first = null;
-    for (const [key, f] of Object.entries(fields)) {
-      const msg = problems[key] || '';
-      f.setError(msg);
-      if (msg && !first) first = f;
-    }
-    if (first) { first.control.focus(); return; }
-    busy = true; setBusy(button, true); onBusy?.(true);
-    try {
-      await run(values);
-    } catch (err) {
-      if (err?.status === 401 && state.me) return;
-      alert.show(messageOf(err));
-    } finally {
-      busy = false;
-      if (button.isConnected) { setBusy(button, false); onBusy?.(false); }
-    }
-  });
-}
-
-const checkEmail = v => {
-  const t = v.trim();
-  if (!t) return 'Wpisz adres e-mail.';
-  if (t.length > LIMITS.email || !EMAIL_RE.test(t)) return 'To nie wygląda na adres e-mail — sprawdź znak @ i domenę.';
-  return '';
-};
-const checkName = (v, empty) => {
-  const t = v.trim();
-  if (!t) return empty;
-  if (t.length > LIMITS.name) return `Maksymalnie ${LIMITS.name} znaków.`;
-  return '';
-};
-const checkNewPassword = v => {
-  if (!v) return 'Ustal hasło.';
-  if (v.length < LIMITS.passwordMin) return `Hasło musi mieć co najmniej ${LIMITS.passwordMin} znaków — brakuje jeszcze ${LIMITS.passwordMin - v.length}.`;
-  if (v.length > LIMITS.passwordMax) return `Hasło może mieć najwyżej ${LIMITS.passwordMax} znaków.`;
-  return '';
-};
-
-function parseUrlInput(raw) {
-  const t = raw.trim();
-  if (!t) return { value: '' };
-  if (/\s/.test(t)) return { error: 'Link nie może zawierać spacji.' };
-  if (t.length > LIMITS.url) return { error: `Link jest za długi (maks. ${LIMITS.url} znaków).` };
-  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(t) || /^(javascript|data|mailto|file|about):/i.test(t);
-  const safe = safeHttpUrl(hasScheme ? t : `https://${t}`);
-  if (!safe || !new URL(safe).hostname.includes('.')) return { error: 'Podaj adres strony zaczynający się od https:// lub http://.' };
-  return { value: safe };
-}
-
-function parsePriceInput(raw) {
-  const t = raw.replace(/[\s ]/g, '').replace(/(zł|zl|pln)$/i, '').replace(',', '.');
-  if (!t) return { value: null };
-  if (!/^\d{1,7}(\.\d{1,2})?$/.test(t)) return { error: 'Podaj kwotę w złotych, np. 149 albo 149,99.' };
-  const n = Number(t);
-  if (n > 1000000) return { error: 'Maksymalnie 1 000 000 zł.' };
-  return { value: Math.round(n * 100) / 100 };
-}
-const priceInputValue = n => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace('.', ','));
-
-// ---------- Ekran powitalny ----------
-
-function renderWelcome() {
-  showShell(false);
-  d.title = 'Mikołaj — rodzinne listy życzeń';
-  mainEl().replaceChildren(viewWelcome());
-}
-
-function viewWelcome() {
-  const card = h('div', { class: 'auth-card', id: 'auth-card' });
-  renderAuthCard(card);
-  const fact = (name, text) => h('li', null, icon(name, 'icon icon--sm'), h('span', { text }));
-
-  return h('div', { class: 'welcome container' },
-    h('div', { class: 'welcome__brand' }, h('span', { class: 'brand__name', text: 'Mikołaj' })),
-    h('div', { class: 'welcome__grid' },
-      h('section', { class: 'welcome__intro' },
-        h('h1', { class: 'display', tabindex: '-1', text: 'Rodzinne listy życzeń.' }),
-        h('p', { class: 'lede', text: 'Każdy pisze swój list i dodaje życzenia. Bliscy po cichu rezerwują prezenty — bez dublowania i bez psucia niespodzianek.' }),
-        h('ul', { class: 'facts', role: 'list' },
-          fact('lock', 'Dostęp mają tylko osoby zaproszone do rodziny.'),
-          fact('gift', 'Jeden prezent — jedna rezerwacja.'),
-          fact('eye-off', 'Na własnej liście nie widzisz rezerwacji.'))),
-      h('div', { class: 'welcome__panel' }, card)),
-    h('footer', { class: 'site-foot', text: 'E-mail służy tylko do logowania. Nie wysyłamy żadnych wiadomości.' }));
-}
-
-function rerenderAuthCard() {
-  const card = d.getElementById('auth-card');
-  if (card && !state.me) renderAuthCard(card);
-}
-
-function renderAuthCard(card) {
-  const { auth, tokens } = state;
-  const parts = [];
-  if (auth.notice) parts.push(h('div', { class: 'callout callout--info', role: 'status' }, icon('info'), h('p', { text: auth.notice })));
-  if (auth.brokenLink) {
-    parts.push(h('div', { class: 'callout callout--error' }, icon('alert'),
-      h('p', { text: 'Ten link jest niekompletny albo uszkodzony. Skopiuj go jeszcze raz w całości lub poproś o nowy.' })));
-  }
-
-  const onMode = mode => {
-    state.auth.mode = mode;
-    state.auth.notice = null;
-    renderAuthCard(card);
-    $('.segmented__btn[aria-pressed="true"]', card)?.focus();
-  };
-
-  if (tokens.invite) {
-    const inv = auth.invitation;
-    if (inv.status === 'loading' || inv.status === 'idle') {
-      parts.push(h('div', { class: 'auth-loading', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { text: 'Sprawdzamy zaproszenie…' })));
-    } else if (inv.status === 'invalid') {
-      parts.push(
-        h('div', { class: 'callout callout--error' }, icon('alert'),
-          h('div', { class: 'callout__body' },
-            h('p', { class: 'callout__title', text: 'To zaproszenie już nie działa.' }),
-            h('p', { text: 'Link mógł zostać zmieniony. Poproś osobę, która prowadzi Waszą rodzinę, o aktualny link. Jeśli masz już konto — zaloguj się.' }))),
-        authHead('Zaloguj się', null),
-        loginForm());
-    } else {
-      if (inv.status === 'error') {
-        const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, icon('refresh', 'icon icon--sm'), 'Sprawdź ponownie');
-        retry.addEventListener('click', () => checkInvitation());
-        parts.push(h('div', { class: 'callout callout--error' }, icon('alert'),
-          h('div', { class: 'callout__body' }, h('p', { text: `Nie udało się sprawdzić zaproszenia. ${inv.message || ''}`.trim() }), retry)));
-      }
-      parts.push(segmented([{ value: 'join', label: 'Dołącz do rodziny' }, { value: 'login', label: 'Mam już konto' }], auth.mode, onMode));
-      if (auth.mode === 'join') {
-        parts.push(
-          h('div', { class: 'auth-card__head' },
-            h('p', { class: 'eyebrow', text: 'Zaproszenie' }),
-            inv.familyName
-              ? h('h2', { class: 'auth-card__title' }, 'Dołącz do rodziny ', h('span', { class: 'auth-card__family', text: `„${inv.familyName}”` }))
-              : h('h2', { class: 'auth-card__title', text: 'Dołącz do rodziny' }),
-            h('p', { class: 'auth-card__text', text: 'Załóż konto, napisz swój list i zobacz listy bliskich.' })),
-          joinForm());
-      } else {
-        parts.push(authHead('Zaloguj się', 'Masz już konto w tej rodzinie? Użyj tego samego adresu e-mail.'), loginForm());
-      }
-    }
-  } else if (tokens.setup) {
-    parts.push(segmented([{ value: 'create', label: 'Załóż rodzinę' }, { value: 'login', label: 'Mam już konto' }], auth.mode, onMode));
-    if (auth.mode === 'create') {
-      parts.push(authHead('Załóż rodzinę', 'Ten prywatny link pozwala utworzyć rodzinę. Dostaniesz link zaproszenia dla bliskich.'), createForm());
-    } else {
-      parts.push(authHead('Zaloguj się', null), loginForm());
-    }
+function vFamily() {
+  const A = S.admin;
+  if (!A) return `${vHead()}<p class="empty">Wczytywanie…</p>`;
+  const name = id => id === me().id ? 'Ty' : esc(A.members.find(m => m.id === id)?.name || '—');
+  const resRow = (r, who) => `<div class="res ${r.purchased ? 'done' : ''}"><span class="t">${esc(r.title)}</span>
+    <span class="n">${who} · ${r.purchased ? 'kupione' : 'do kupienia'} · ${tier(r.tier).range}</span></div>`;
+  const accounts = A.members.filter(m => !m.managedBy);
+  let resHtml;
+  if (S.famView === 'buyer') {
+    resHtml = accounts.map(b => {
+      const rs = A.reservations.filter(r => r.buyerId === b.id);
+      const hidden = A.hidden[b.id] || 0;
+      const you = b.id === me().id ? ' <span class="you">(Ty)</span>' : '';
+      if (!rs.length && !hidden) return `<div class="res-group"><h3>${esc(b.name)}${you}</h3><p class="empty">Nic jeszcze nie kupuje.</p></div>`;
+      return `<div class="res-group"><h3>${esc(b.name)}${you}<span>${rs.filter(r => r.purchased).length} z ${rs.length} kupione</span></h3>
+        ${rs.map(r => resRow(r, `dla: ${name(r.ownerId)}`)).join('')}
+        ${hidden ? `<p class="empty">+ ${hidden} dla Ciebie — ukryte</p>` : ''}</div>`;
+    }).join('');
   } else {
-    parts.push(authHead('Zaloguj się', null), loginForm());
-    parts.push(h('div', { class: 'auth-card__foot' },
-      h('strong', { text: 'Nie masz konta?' }),
-      h('p', { text: 'Konto zakłada się wyłącznie z prywatnego linku zaproszenia. Poproś o niego osobę, która prowadzi Waszą rodzinę.' })));
+    resHtml = A.members.filter(m => m.id !== me().id).map(m => {
+      const total = wishesOf(m.id).length;
+      const rs = A.reservations.filter(r => r.ownerId === m.id);
+      return `<div class="res-group"><h3>${esc(m.name)}<span>${rs.length} z ${total} zajęte</span></h3>
+        ${rs.length ? rs.map(r => resRow(r, `kupuje ${name(r.buyerId)}`)).join('') : '<p class="empty">Nikt jeszcze nic nie wybrał.</p>'}</div>`;
+    }).join('') + `<p class="priv mt">Twojej listy tu nie ma — żeby nie zepsuć Ci niespodzianki.</p>`;
   }
-  card.replaceChildren(...parts);
+
+  const confirming = (act, id) => S.confirm?.act === act && S.confirm.id === id;
+  const people = A.members.slice().sort((a, b) => (a.id === me().id ? -1 : b.id === me().id ? 1 : 0) || (!!a.managedBy - !!b.managedBy));
+  const row = m => {
+    const own = m.id === me().id, open = S.fam === m.id;
+    const meta = m.managedBy ? `bez konta · prowadzi ${name(m.managedBy)}`
+      : [esc(m.email), m.isAdmin ? 'organizator' : '', m.canAdd ? 'może dodawać osoby' : ''].filter(Boolean).join(' · ');
+    let actions = '';
+    if (open && !m.managedBy) actions = `<div class="fam-actions">
+        ${own ? '' : `<button class="a" data-act="person-link" data-id="${m.id}">Link do nowego hasła</button>`}
+        <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
+        ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
+        <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>`}
+      </div>
+      ${confirming('make-admin', m.id) ? confirmBox('make-admin', m.id, `${esc(m.name)} zostanie organizatorem. Ty stracisz dostęp do tej zakładki.`, 'Przekaż') : ''}
+      ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `${esc(m.name)} straci dostęp. Znikną list, życzenia i rezerwacje tej osoby.${A.members.some(x => x.managedBy === m.id) ? ' Osoby, które prowadzi, przejdą do Ciebie.' : ''}`, 'Usuń') : ''}`;
+    if (open && m.managedBy) actions = `<div class="fam-actions">
+        <label class="sr" for="f-manager">Opiekun</label>
+        <select class="in" id="f-manager">${accounts.map(a => `<option value="${a.id}" ${a.id === m.managedBy ? 'selected' : ''}>Prowadzi: ${esc(a.name)}</option>`).join('')}</select>
+        <button class="a" data-act="save-manager" data-id="${m.id}">Zmień opiekuna</button>
+        <button class="a" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
+        <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>
+      </div>
+      ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `Zniknie list i życzenia: ${esc(m.name)}.`, 'Usuń') : ''}`;
+    return `<div class="fam">
+      <button class="fam-btn" data-act="fam" data-id="${m.id}" aria-expanded="${open}">
+        <span class="t">${esc(m.name)}${own ? ' <span class="you">(Ty)</span>' : ''}</span>
+        <span class="more-txt">${open ? 'Zamknij' : 'Zarządzaj'}</span>
+        <span class="n">${meta}</span>
+      </button>${actions}</div>`;
+  };
+  const tok = A.invite.split('=').pop();
+  return `${vHead()}<section class="fade">
+    <h1 class="title">Rodzina</h1>
+    <p class="sub">Tę zakładkę widzisz tylko Ty, bo jesteś organizatorem.</p>
+    <h2 class="label">Kto co kupuje</h2>
+    <div class="filter">
+      <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
+      <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
+    </div>
+    ${resHtml}
+    <h2 class="label">Zaproszenie</h2>
+    <p class="fam-text">Każdy, kto ma ten link, może dołączyć do rodziny. Wysyłaj go prywatnie — SMS-em albo w komunikatorze.</p>
+    <p class="linkline">…/#invite=${esc(tok.slice(0, 4))}…${esc(tok.slice(-3))}</p>
+    <div class="actions">
+      <button class="a solid" data-act="copy-invite">Skopiuj link</button>
+      <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
+    </div>
+    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
+    <h2 class="label">Osoby · ${A.members.length}</h2>
+    ${people.map(row).join('')}
+  </section>`;
 }
 
-function authHead(title, text) {
-  return h('div', { class: 'auth-card__head' },
-    h('h2', { class: 'auth-card__title', text: title }),
-    text ? h('p', { class: 'auth-card__text', text }) : null);
+function vAuth() {
+  const I = S.info || {};
+  if (S.screen === 'join') return `<section class="auth fade">
+    <h1 class="title">${I.setup ? 'Nowa rodzina' : 'Zaproszenie'}</h1>
+    <p class="sub">${I.setup ? 'Załóż rodzinę i swoje konto organizatora.' : `${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodzinnych list do Mikołaja.`}</p>
+    <form class="form" data-form="join">
+      ${I.setup ? '<input class="in" name="familyName" placeholder="Nazwa rodziny" maxlength="80" required>' : ''}
+      <input class="in" name="name" placeholder="Imię" maxlength="60" required autocomplete="given-name">
+      <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 10 znaków" minlength="10" required autocomplete="new-password">
+      <div class="actions"><button class="a solid">Dołączam</button></div>
+    </form>
+  </section>`;
+  if (S.screen === 'link') return `<section class="auth fade">
+    <h1 class="title">Cześć, ${esc(I.name)}</h1>
+    <p class="sub">${I.needsEmail ? 'Ustaw e-mail i hasło — od teraz sam(a) prowadzisz swoją listę.' : 'Ustaw nowe hasło.'}</p>
+    <form class="form" data-form="link">
+      ${I.needsEmail ? '<input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">' : ''}
+      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 10 znaków" minlength="10" required autocomplete="new-password">
+      <div class="actions"><button class="a solid">Zapisz</button></div>
+    </form>
+  </section>`;
+  return `<section class="auth fade">
+    <h1 class="title">Mikołaj</h1>
+    <p class="sub">Rodzinne listy do Mikołaja.</p>
+    <form class="form" data-form="login">
+      <input class="in" name="email" type="email" placeholder="E-mail" required autocomplete="email">
+      <input class="in" name="password" type="password" placeholder="Hasło" required autocomplete="current-password">
+      <div class="actions"><button class="a solid">Zaloguj się</button></div>
+    </form>
+    <p class="foot">Konto zakłada się z linku zaproszenia. Zapomniane hasło? Poproś organizatora o nowy link.</p>
+  </section>`;
 }
 
-function segmented(options, current, onChange) {
-  return h('div', { class: 'segmented', role: 'group', 'aria-label': 'Wybierz formularz' },
-    options.map(o => h('button', {
-      type: 'button',
-      class: 'segmented__btn',
-      'aria-pressed': String(o.value === current),
-      onclick: () => { if (o.value !== current) onChange(o.value); },
-    }, o.label)));
+/* ===================== RENDER ===================== */
+const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
+function render(animate = false) {
+  const y = window.scrollY;
+  const loggedIn = S.data?.user;
+  if (loggedIn && !TABS[S.screen]) S.screen = 'lists';
+  if (S.screen === 'family' && !me()?.isAdmin) S.screen = 'lists';
+  const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily }[S.screen]();
+  $('#app').innerHTML = view;
+  if (!animate) { $('.fade')?.classList.remove('fade'); window.scrollTo(0, y); }
+  markFits();
+  syncAll();
 }
-
-function emailNote() {
-  return h('p', { class: 'email-note' }, icon('info', 'icon icon--sm'),
-    h('span', { text: 'E-mail to tylko login — nie wysyłamy wiadomości i nie ma jeszcze resetu hasła. Zapisz hasło w menedżerze haseł.' }));
+function go(screen) {
+  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null });
+  if (TABS[screen]) history.replaceState(null, '', TABS[screen]);
+  window.scrollTo(0, 0);
+  render(true);
+  if (screen === 'family') act(() => {});
 }
-
-function emailField() {
-  return field({ label: 'E-mail', name: 'email', type: 'email', autocomplete: 'username', required: true, maxlength: LIMITS.email, inputmode: 'email', spellcheck: false, autocapitalize: 'none' });
-}
-
-function authForm({ fields, submitLabel, validate, submit, registered }) {
-  const alert = formAlert();
-  const button = h('button', { type: 'submit', class: 'btn btn--primary btn--block' }, submitLabel);
-  const form = h('form', { class: 'form', novalidate: true },
-    Object.values(fields).map(f => f.wrap), alert.el, button, emailNote());
-  bindSubmit({
-    form, button, alert, fields, validate,
-    run: async values => {
-      const me = normSession(await submit(values));
-      if (!me) throw bad();
-      onAuthenticated(me, registered);
-    },
+// sekcje, które mieszczą się w podglądzie, nie potrzebują „Rozwiń”
+function markFits() {
+  document.querySelectorAll('.fold').forEach(f => {
+    const limit = parseFloat(getComputedStyle(f).getPropertyValue('--peek'));
+    f.classList.toggle('fits', f.querySelector('.peek-inner').offsetHeight <= limit + 24);
   });
-  return form;
 }
-
-function loginForm() {
-  return authForm({
-    fields: { email: emailField(), password: passwordField({ label: 'Hasło', autocomplete: 'current-password' }) },
-    submitLabel: 'Zaloguj się',
-    validate: v => ({ email: checkEmail(v.email), password: v.password ? '' : 'Wpisz hasło.' }),
-    submit: v => api('POST', '/api/login', { email: v.email.trim(), password: v.password }),
-    registered: false,
-  });
+function syncAll() {
+  const b = $('[data-act="toggle-all"]'); if (!b) return;
+  const keys = [...document.querySelectorAll('.person:not(.fits)')].map(f => f.dataset.fold);
+  b.textContent = keys.length && keys.every(k => S.open.has(k)) ? 'Zwiń wszystkie' : 'Rozwiń wszystkie';
 }
-
-function createForm() {
-  return authForm({
-    fields: {
-      familyName: field({ label: 'Nazwa rodziny', name: 'family', required: true, maxlength: LIMITS.family, placeholder: 'np. Kowalscy', autocomplete: 'off', hint: 'Zobaczą ją wszyscy zaproszeni.' }),
-      name: field({ label: 'Twoje imię', name: 'name', required: true, maxlength: LIMITS.name, autocomplete: 'given-name', placeholder: 'np. Ania' }),
-      email: emailField(),
-      password: passwordField({ label: 'Hasło', autocomplete: 'new-password', isNew: true }),
-    },
-    submitLabel: 'Załóż rodzinę',
-    validate: v => ({
-      familyName: !v.familyName.trim() ? 'Nadaj rodzinie nazwę.' : v.familyName.trim().length > LIMITS.family ? `Maksymalnie ${LIMITS.family} znaków.` : '',
-      name: checkName(v.name, 'Wpisz swoje imię — tak zobaczą Cię bliscy.'),
-      email: checkEmail(v.email),
-      password: checkNewPassword(v.password),
-    }),
-    submit: v => api('POST', '/api/create', { setupToken: state.tokens.setup, familyName: v.familyName.trim(), name: v.name.trim(), email: v.email.trim(), password: v.password }),
-    registered: true,
-  });
-}
-
-function joinForm() {
-  return authForm({
-    fields: {
-      name: field({ label: 'Twoje imię', name: 'name', required: true, maxlength: LIMITS.name, autocomplete: 'given-name', placeholder: 'np. Ania', hint: 'Tak zobaczą Cię bliscy.' }),
-      email: emailField(),
-      password: passwordField({ label: 'Hasło', autocomplete: 'new-password', isNew: true }),
-    },
-    submitLabel: 'Dołącz do rodziny',
-    validate: v => ({
-      name: checkName(v.name, 'Wpisz swoje imię — tak zobaczą Cię bliscy.'),
-      email: checkEmail(v.email),
-      password: checkNewPassword(v.password),
-    }),
-    submit: v => api('POST', '/api/join', { inviteToken: state.tokens.invite, name: v.name.trim(), email: v.email.trim(), password: v.password }),
-    registered: true,
-  });
-}
-
-async function checkInvitation() {
-  const token = state.tokens.invite;
-  if (!token) return;
-  state.auth.invitation = { status: 'loading', familyName: '' };
-  rerenderAuthCard();
-  let next;
-  try {
-    const data = await api('GET', `/api/invitation/${encodeURIComponent(token)}`);
-    const familyName = isStr(data.familyName) ? data.familyName.trim() : '';
-    if (!familyName) throw bad();
-    next = { status: 'ok', familyName };
-  } catch (err) {
-    next = err.status === 404 || err.status === 410
-      ? { status: 'invalid', familyName: '' }
-      : { status: 'error', familyName: '', message: messageOf(err) };
-  }
-  if (token !== state.tokens.invite || state.me) return;
-  state.auth.invitation = next;
-  if (next.status === 'invalid') state.auth.mode = 'login';
-  rerenderAuthCard();
-}
-
-function onAuthenticated(me, registered, { silent = false } = {}) {
-  state.me = me;
-  state.tokens = { setup: null, invite: null };
-  state.auth = freshAuth();
-  state.pendingLink = null;
-  clearFragment();
-  state.appHash = '';
-  renderApp({ initial: silent });
-  if (silent) return;
-  toast(registered
-    ? `Witaj w rodzinie „${me.family.name}”. Zacznij od swojego listu.`
-    : `Witaj ponownie, ${firstName(me.user.name)}.`, { tone: 'success' });
-}
-
-function signedOut(notice, link = null) {
-  state.me = null;
-  state.inviteUrl = null;
-  state.editingLetter = false;
-  state.letterDirty = false;
-  state.pendingLink = null;
-  letterNode = null;
-  closeAllDialogs();
-  applyLink(link);
-  state.auth.notice = notice;
-  if (link?.token) history.replaceState(null, '', `${location.pathname}${location.search}#${link.kind}=${encodeURIComponent(link.token)}`);
-  else clearFragment();
-  renderWelcome();
-  if (state.tokens.invite) checkInvitation();
-  focusHeading();
-}
-
-function sessionExpired() {
-  if (!state.me) return;
-  signedOut('Sesja wygasła. Zaloguj się ponownie.');
-}
-
-async function logout(btn, link = null) {
-  setBusy(btn, true);
-  try {
-    await api('POST', '/api/logout', {});
-  } catch (err) {
-    if (err.status !== 401) {
-      toast(messageOf(err), { tone: 'error' });
-      if (btn.isConnected) setBusy(btn, false);
-      return;
-    }
-  }
-  setBusy(btn, false);
-  signedOut(link ? null : 'Wylogowano. Do zobaczenia!', link);
-}
-
-// ---------- Powłoka aplikacji ----------
-
-function showShell(on) {
-  d.getElementById('topbar').hidden = !on;
-  d.body.classList.toggle('is-authed', on);
-  if (!on) d.getElementById('notice').replaceChildren();
-}
-
-function renderShell() {
-  if (!state.me) return;
-  const { user } = state.me;
-  showShell(true);
-  // W podglądzie imię aktywnej osoby pokazuje wyłącznie lista wyboru.
-  d.getElementById('session').hidden = DEMO;
-  d.getElementById('session-name').textContent = user.name;
-  d.getElementById('logout-btn').setAttribute('aria-label', `Wyloguj się (${user.name})`);
-  if (!DEMO) d.getElementById('brand-family').hidden = true;
-
-  renderPendingNotice();
-}
-
-function updateNav(routeName) {
-  for (const a of d.querySelectorAll('[data-nav]')) {
-    const nav = a.dataset.nav;
-    if (nav === routeName) a.setAttribute('aria-current', 'page');
-    else a.removeAttribute('aria-current');
-    a.classList.toggle('is-active', routeName === 'member' && nav === 'home');
+// płynne rozwijanie i zwijanie bez przerysowania
+function toggleFold(key, bulk = false) {
+  const f = document.querySelector(`[data-fold="${key}"]`);
+  if (!f || f.classList.contains('fits')) return;
+  const peek = f.querySelector('.peek');
+  const open = !S.open.has(key);
+  open ? S.open.add(key) : S.open.delete(key);
+  f.querySelectorAll('[data-toggle]').forEach(b => b.setAttribute('aria-expanded', open));
+  if (open) {
+    peek.style.maxHeight = peek.scrollHeight + 'px';
+    f.classList.add('open');
+    peek.addEventListener('transitionend', () => { if (S.open.has(key)) peek.style.maxHeight = ''; }, { once: true });
+  } else {
+    // nagłówek przyklejony w głębi listy — wróć do początku sekcji
+    const top = f.getBoundingClientRect().top;
+    if (top < 0 && !bulk) window.scrollBy(0, top);
+    peek.style.maxHeight = peek.scrollHeight + 'px';
+    peek.offsetHeight;
+    f.classList.remove('open');
+    peek.style.maxHeight = '';
   }
 }
 
-function renderPendingNotice() {
-  const slot = d.getElementById('notice');
-  const link = state.pendingLink;
-  if (DEMO || !link || !state.me) { slot.replaceChildren(); return; }
-  const what = link.kind === 'invite' ? 'link zaproszenia do rodziny' : 'link do założenia nowej rodziny';
-  const leave = h('button', { type: 'button', class: 'btn btn--primary btn--sm' }, 'Wyloguj się i użyj linku');
-  const stay = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Zignoruj');
-  leave.addEventListener('click', () => logout(leave, link));
-  stay.addEventListener('click', () => { state.pendingLink = null; renderPendingNotice(); focusHeading(); });
-  slot.replaceChildren(h('div', { class: 'container' },
-    h('div', { class: 'banner', role: 'region', 'aria-label': 'Otwarty link' },
-      h('p', { class: 'banner__text', text: `Otwarto ${what}, ale masz otwartą sesję jako ${state.me.user.name} (${state.me.family.name}). Aby go użyć, najpierw się wyloguj.` }),
-      h('div', { class: 'banner__actions' }, leave, stay))));
+let toastTimer, undoFn = null;
+function toast(msg, undo) {
+  $('.toast')?.remove();
+  clearTimeout(toastTimer);
+  const el = document.createElement('div');
+  el.className = 'toast'; el.setAttribute('role', 'status');
+  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button data-act="undo">Cofnij</button>' : ''}`;
+  document.body.appendChild(el);
+  undoFn = undo || null;
+  toastTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, 4000);
+}
+const focusFirst = () => setTimeout(() => $('.form .in')?.focus(), 0);
+function setTheme(t) {
+  theme = t;
+  try { localStorage.setItem('mikolaj.theme', t); } catch {}
+  t === 'auto' ? document.documentElement.removeAttribute('data-theme') : document.documentElement.setAttribute('data-theme', t);
 }
 
-function renderApp({ initial = true } = {}) {
-  renderShell();
-  renderRoute({ initial });
-}
+/* ===================== ZDARZENIA ===================== */
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-go],[data-toggle],[data-edit],[data-act],[data-filter]');
+  if (!t) return;
+  const d = t.dataset;
+  if (d.go) return go(d.go);
+  if (d.toggle) { toggleFold(d.toggle); return syncAll(); }
+  if (d.edit) { S.editWish = d.edit; S.adding = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); render(); return focusFirst(); }
+  if (d.filter) { S.filter[d.pid] = d.filter; return render(); }
+  const id = d.id;
+  switch (d.act) {
+    case 'toggle-all': {
+      const keys = [...document.querySelectorAll('.person:not(.fits)')].map(f => f.dataset.fold);
+      const expand = !keys.every(k => S.open.has(k));
+      if (!expand) window.scrollTo({ top: 0, behavior: 'smooth' });
+      keys.forEach(k => { if (S.open.has(k) !== expand) toggleFold(k, true); });
+      return syncAll(); }
+    case 'menu': S.menu = !S.menu; $('.menu').classList.toggle('open', S.menu); t.setAttribute('aria-expanded', S.menu); return;
+    case 'theme': setTheme({ auto: 'light', light: 'dark', dark: 'auto' }[theme]); return render();
+    case 'logout': return act(async () => { await api('logout', 'POST'); S.screen = 'login'; history.replaceState(null, '', '#/'); }, null);
+    case 'confirm-cancel': S.confirm = null; return render();
+    case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
-// ---------- Routing (#/…) ----------
+    // rezerwacje
+    case 'reserve': return act(() => api(`wishes/${id}/reserve`, 'POST'), 'Kupujesz to', () => api(`wishes/${id}/reserve`, 'DELETE'));
+    case 'buy': { const p = !wish(id).purchased; return act(() => api(`wishes/${id}/reserve`, 'PATCH', { purchased: p }), p ? 'Oznaczone jako kupione' : null); }
+    case 'cancel': return act(() => api(`wishes/${id}/reserve`, 'DELETE'), 'Prezent znów jest wolny', () => api(`wishes/${id}/reserve`, 'POST'));
 
-function parseRoute() {
+    // życzenia i listy
+    case 'add': S.adding = d.owner; S.editWish = null; S.open.add(secKey('wishes', d.owner)); render(); return focusFirst();
+    case 'close-edit': S.adding = null; S.editWish = null; S.confirm = null; return render();
+    case 'save-wish': {
+      const title = $('#f-title').value.trim();
+      if (!title) return $('#f-title').focus();
+      if (!$('#f-tier').value) return $('#f-tier').focus();
+      const f = { title, note: $('#f-note').value.trim(), url: $('#f-url').value.trim(), tier: $('#f-tier').value };
+      return act(async () => {
+        await (id ? api(`wishes/${id}`, 'PATCH', f) : api('wishes', 'POST', { ...f, ownerId: d.owner }));
+        S.adding = null; S.editWish = null;
+      }, id ? 'Zapisano' : 'Dodano'); }
+    case 'delete-wish':
+      if (!d.sure) { S.confirm = { act: 'delete-wish', id }; return render(); }
+      return act(async () => { await api(`wishes/${id}`, 'DELETE'); S.editWish = null; S.confirm = null; }, 'Usunięto');
+    case 'edit-letter': S.editLetter = d.owner; S.open.add(secKey('letter', d.owner)); render(); return focusFirst();
+    case 'cancel-letter': S.editLetter = null; return render();
+    case 'save-letter': {
+      const letter = $('#f-letter').value.trim();
+      return act(async () => { await api(`members/${d.owner}/letter`, 'PATCH', { letter }); S.editLetter = null; }, 'List zapisany'); }
+
+    // osoby prowadzone
+    case 'add-person': S.addingPerson = true; render(); return focusFirst();
+    case 'cancel-person': S.addingPerson = false; return render();
+    case 'save-person': {
+      const name = $('#f-person').value.trim();
+      if (!name) return $('#f-person').focus();
+      return act(async () => {
+        const { id: nid } = await api('members', 'POST', { name });
+        S.addingPerson = false; S.editLetter = nid; S.open.add(secKey('letter', nid));
+        setTimeout(() => { document.querySelector(`[data-fold="${secKey('letter', nid)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); focusFirst(); }, 0);
+      }, `Dodano: ${name}`); }
+    case 'remove-person':
+      if (!d.sure) { S.confirm = { act: 'remove-person', id }; return render(); }
+      return act(async () => { await api(`members/${id}`, 'DELETE'); S.confirm = null; }, 'Usunięto');
+    case 'person-link': {
+      const m = S.admin?.members.find(x => x.id === id) || member(id);
+      return act(async () => {
+        const { url } = await api(`members/${id}/link`, 'POST');
+        await copy(url, m.managedBy ? `Link skopiowany — ${m.name} ustawi w nim e-mail i hasło (ważny 3 dni)` : `Link dla ${m.name} skopiowany. Działa raz, przez 3 dni.`);
+      }); }
+
+    // organizator
+    case 'fam-view': S.famView = d.v; return render();
+    case 'fam': S.fam = S.fam === id ? null : id; S.confirm = null; return render();
+    case 'copy-invite': return copy(S.admin.invite, 'Link skopiowany');
+    case 'new-invite':
+      if (!d.sure) { S.confirm = { act: 'new-invite' }; return render(); }
+      return act(async () => { await api('invite', 'POST'); S.confirm = null; }, 'Nowy link gotowy. Stary już nie działa.');
+    case 'toggle-add': return act(() => api(`members/${id}`, 'PATCH', { canAdd: Boolean(d.on) }), 'Zapisano');
+    case 'save-manager': return act(() => api(`members/${id}`, 'PATCH', { managedBy: $('#f-manager').value }), 'Opiekun zmieniony');
+    case 'make-admin':
+      if (!d.sure) { S.confirm = { act: 'make-admin', id }; return render(); }
+      return act(async () => { await api(`members/${id}`, 'PATCH', { admin: true }); S.screen = 'lists'; S.confirm = null; S.fam = null; history.replaceState(null, '', '#/'); }, 'Rola organizatora przekazana');
+    case 'remove-member':
+      if (!d.sure) { S.confirm = { act: 'remove-member', id }; return render(); }
+      return act(async () => { await api(`members/${id}`, 'DELETE'); S.confirm = null; S.fam = null; }, 'Usunięto z rodziny');
+  }
+});
+
+document.addEventListener('submit', e => {
+  e.preventDefault();
+  const form = e.target, body = Object.fromEntries(new FormData(form));
+  const kind = form.dataset.form;
+  act(async () => {
+    if (kind === 'login') await api('login', 'POST', body);
+    if (kind === 'join') await api(S.info.setup ? 'create' : 'join', 'POST', { ...body, [S.info.setup ? 'setupToken' : 'inviteToken']: S.token });
+    if (kind === 'link') await api(`link/${S.token}`, 'POST', body);
+    S.token = null; S.info = null;
+    S.screen = kind === 'join' ? 'mine' : 'lists';
+    history.replaceState(null, '', TABS[S.screen]);
+  });
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !S.data?.user) return;
+  if (S.editWish || S.adding || S.editLetter || S.addingPerson || S.confirm) {
+    Object.assign(S, { editWish: null, adding: null, editLetter: null, addingPerson: false, confirm: null });
+    render();
+  }
+});
+
+/* ===================== START ===================== */
+async function start() {
+  setTheme(theme);
   const hash = location.hash;
-  if (!hash.startsWith('#/')) return { name: 'home' };
-  const [seg, arg] = hash.slice(2).split('/');
-  switch (seg) {
-    case '': return { name: 'home' };
-    case 'moje':
-    case 'moja-lista':
-    case 'rezerwacje': return { name: 'mine' };
-    case 'zaproszenie': return { name: 'invite' };
-    case 'osoba': {
-      if (!arg) return { name: 'home' };
-      try { return { name: 'member', id: decodeURIComponent(arg) }; } catch { return { name: 'notfound' }; }
-    }
-    default: return { name: 'notfound' };
-  }
-}
-
-const ROUTES = {
-  home: { title: () => 'Listy', render: () => viewHome() },
-  mine: {
-    title: () => 'Moje',
-    load: async () => {
-      const id = state.me.user.id;
-      const [mine, reservations] = await Promise.all([
-        api('GET', `/api/members/${encodeURIComponent(id)}/wishes`),
-        api('GET', '/api/reservations'),
-      ]);
-      return { mine: normMemberWishes(mine, id), reservations: normReservations(reservations) };
-    },
-    render: data => viewMy(data),
-  },
-
-  invite: { title: () => 'Zaproś bliskich', render: () => viewInvite() },
-  notfound: { title: () => 'Nie znaleziono', render: () => viewNotFound() },
-};
-
-async function refreshMe() {
-  const me = normSession(await api('GET', '/api/me'));
-  if (!me) {
-    sessionExpired();
-    throw new ApiError('Sesja wygasła. Zaloguj się ponownie.', 401);
-  }
-  if (!state.me) return me;
-  state.me = me;
-  renderShell();
-  return me;
-}
-
-let routeSeq = 0;
-
-async function renderRoute({ quiet = false, silent = false, initial = false } = {}) {
-  if (!state.me) return;
-  saveDisclosures();
-  const seq = ++routeSeq;
-  let route = parseRoute();
-  if (route.name === 'member') {
-    disclosureState.set(`${state.me.user.id}:person:${route.id}`, true);
+  const token = hash.match(/^#(invite|setup|link)=([a-f0-9]{64})$/);
+  if (token) {
+    // Sekret tylko w pamięci — usuń go z paska adresu.
     history.replaceState(null, '', '#/');
-    route = { name: 'home' };
-  } else if (route.name === 'mine' && location.hash !== '#/moje') {
-    history.replaceState(null, '', '#/moje');
-  }
-  if (!quiet) {
-    state.editingLetter = false;
-    state.letterDirty = false;
-
-    letterNode = null;
-    closeAllDialogs();
-  }
-  state.appHash = location.hash;
-  const def = ROUTES[route.name];
-  updateNav(route.name);
-
-  const m = mainEl();
-  const focusKey = quiet ? d.activeElement?.closest?.('[data-fkey]')?.dataset.fkey : null;
-  const scrollY = window.scrollY;
-  let loaderTimer = 0;
-  if (!quiet) {
-    loaderTimer = setTimeout(() => { if (seq === routeSeq) m.replaceChildren(viewLoading()); }, 160);
-  }
-  m.setAttribute('aria-busy', 'true');
-
-  let node;
-  try {
-    const [, data] = await Promise.all([refreshMe(), def.load ? def.load(route) : null]);
-    if (seq !== routeSeq || !state.me) return;
-    node = def.render(data, route);
-    d.title = `${def.title(data, route)} · Mikołaj`;
-  } catch (err) {
-    if (seq !== routeSeq || !state.me || err?.status === 401) return;
-    if (quiet) {
-      if (!silent) toast(`Nie udało się odświeżyć widoku. ${messageOf(err)}`, { tone: 'error' });
-      return;
-    }
-    node = viewError(err, () => renderRoute(), route.name === 'member');
-    d.title = 'Błąd · Mikołaj';
-  } finally {
-    clearTimeout(loaderTimer);
-    if (seq === routeSeq) m.removeAttribute('aria-busy');
-  }
-
-  m.replaceChildren(node);
-  if (quiet) {
-    window.scrollTo(0, scrollY);
-    if (focusKey) {
-      const next = d.querySelector(`[data-fkey="${CSS.escape(focusKey)}"]`);
-      if (next && !d.querySelector('dialog[open]')) next.focus({ preventScroll: true });
-    }
+    S.token = token[2];
+    try {
+      if (token[1] === 'invite') { S.info = await api(`invitation/${S.token}`); S.screen = 'join'; }
+      if (token[1] === 'setup') { S.info = { setup: true }; S.screen = 'join'; }
+      if (token[1] === 'link') { S.info = await api(`link/${S.token}`); S.screen = 'link'; }
+    } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message), 0); }
   } else {
-    window.scrollTo(0, 0);
-    if (!initial) focusHeading();
+    S.screen = Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
   }
+  try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message); }
+  // Zalogowany, ale otwiera link? Najpierw link — po zapisaniu wraca do aplikacji.
+  if (S.token && S.data.user) S.data = { user: null };
+  render(true);
+  if (S.screen === 'family' && S.data.user) act(() => {});
 }
-
-const refreshView = () => renderRoute({ quiet: true });
-
-async function act(btn, call, { success } = {}) {
-  if (!btn || btn.disabled) return;
-  setBusy(btn, true);
-  try {
-    await call();
-    await refreshView();
-    if (success) toast(success, { tone: 'success' });
-  } catch (err) {
-    if (err?.status === 401) return;
-    toast(messageOf(err), { tone: 'error' });
-    if (err?.status === 409 || err?.status === 404 || err?.status === 403) await refreshView();
-  } finally {
-    if (btn.isConnected) setBusy(btn, false);
-  }
-}
-
-// ---------- Widoki pomocnicze ----------
-
-function viewLoading(label = 'Wczytywanie…') {
-  return h('div', { class: 'loading', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { text: label }));
-}
-
-function stateView(title, text, actions) {
-  return h('section', { class: 'state container' },
-    h('h1', { class: 'page-title', tabindex: '-1', text: title }),
-    h('p', { class: 'state__text', text }),
-    h('div', { class: 'state__actions' }, actions));
-}
-
-function viewError(err, retry, withBack = false) {
-  const retryBtn = h('button', { type: 'button', class: 'btn btn--primary' }, icon('refresh', 'icon icon--sm'), 'Spróbuj ponownie');
-  retryBtn.addEventListener('click', retry);
-  return stateView('Nie udało się wczytać', messageOf(err),
-    [retryBtn, withBack ? h('a', { class: 'btn btn--secondary', href: '#/' }, 'Listy bliskich') : null]);
-}
-
-function viewNotFound() {
-  return stateView('Tej strony tu nie ma', 'Może adres się zmienił.', [h('a', { class: 'btn btn--primary', href: '#/' }, 'Listy bliskich')]);
-}
-
-function quiet(iconName, text) {
-  return [icon(iconName, 'icon icon--sm'), h('span', { text })];
-}
-
-function pageHead({ title, meta, note, action, back }) {
-  return h('header', { class: 'page-head' },
-    back || null,
-    h('div', { class: 'page-head__row' },
-      h('div', { class: 'page-head__text' },
-        h('h1', { class: 'page-title', tabindex: '-1', text: title }),
-        meta ? h('p', { class: 'page-meta' }, meta) : null),
-      action || null),
-    note ? h('p', { class: 'page-note' }, note) : null);
-}
-
-function addWishButton(fkey) {
-  const btn = h('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-fkey': fkey }, icon('plus', 'icon icon--sm'), 'Dodaj życzenie');
-  btn.addEventListener('click', () => openWishDialog(null));
-  return btn;
-}
-
-function sectionHead(id, title, n, action, tag = 'h2') {
-  return h('div', { class: 'section-head' },
-    h(tag, { class: 'section-title', id },
-      title,
-      n ? h('span', { class: 'section-count', text: String(n) }) : null),
-    action || null);
-}
-
-// ---------- Listy bliskich ----------
-
-function viewHome() {
-  const { user, family, members } = state.me;
-  const all = members.some(m => m.id === user.id) ? members : [...members, { id: user.id, name: user.name, letter: '', wishCount: 0 }];
-  const people = [...all].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-  const mine = all.find(m => m.id === user.id);
-  const missingLetter = !mine.letter.trim();
-  const missingWishes = !mine.wishCount;
-  let prompt = null;
-  if (missingLetter || missingWishes) {
-    const both = missingLetter && missingWishes;
-    prompt = h('aside', { class: 'setup-prompt', 'aria-label': 'Uzupełnij swój list' },
-      h('div', null,
-        h('p', { class: 'setup-prompt__title', text: both ? 'Podpowiedz bliskim, co Cię ucieszy' : missingLetter ? 'Dodaj kilka słów od siebie' : 'Dodaj pierwsze życzenie' }),
-        h('p', { class: 'setup-prompt__text', text: both ? 'Napisz swój list i dodaj życzenia, żeby bliscy wiedzieli, co wybrać.' : missingLetter ? 'Życzenia już masz. Napisz jeszcze swój list do Mikołaja.' : 'Twój list jest gotowy. Dodaj prezenty, które chętnie znajdziesz pod choinką.' })),
-      h('a', { class: 'btn btn--primary btn--sm', href: '#/moje', 'data-fkey': 'complete-mine' }, both ? 'Uzupełnij moje' : missingLetter ? 'Napisz list' : 'Dodaj życzenie'));
-  }
-  return h('div', { class: 'page container page--narrow' },
-    pageHead({ title: 'Listy', meta: `${family.name} · ${count(people.length, FORMS.person)}` }),
-    prompt,
-    h('div', { class: 'family-lists' }, people.map(personAccordion)),
-    people.length < 2 ? h('div', { class: 'empty' },
-      h('p', { class: 'empty__text', text: 'Listy bliskich pojawią się, gdy dołączą do rodziny.' }),
-      user.isAdmin && !DEMO ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/zaproszenie' }, 'Zaproś bliskich') : null) : null);
-}
-
-function personAccordion(member) {
-  const viewerId = state.me.user.id;
-  const own = member.id === viewerId;
-  const content = h('div', { class: 'person-fold__body' });
-  const row = rememberDisclosure(h('details', { class: 'person-fold', 'data-person-id': member.id },
-    h('summary', { class: 'person-fold__summary', 'data-fkey': `person-${member.id}` },
-      h('h2', { class: 'person__name', text: member.name }),
-      own ? h('span', { class: 'tag tag--accent', text: 'Twój list' }) : null,
-      h('span', { class: 'person-fold__count', text: count(member.wishCount, FORMS.wish) }),
-      icon('arrow-right', 'icon icon--sm disclosure-arrow')),
-    content), `person:${member.id}`);
-  let loading = false;
-  let loaded = false;
-  const filterKey = `${viewerId}:filter:${member.id}`;
-  const getFilter = () => disclosureState.get(filterKey) ? 'free' : 'all';
-  const load = async () => {
-    if (loading || loaded || !row.open) return;
-    loading = true;
-    content.setAttribute('aria-busy', 'true');
-    content.replaceChildren(h('p', { class: 'muted', role: 'status', text: 'Wczytywanie listu…' }));
-    try {
-      const data = normMemberWishes(await api('GET', `/api/members/${encodeURIComponent(member.id)}/wishes`), viewerId);
-      if (!row.isConnected || state.me?.user.id !== viewerId) return;
-      loaded = true;
-      const empty = h('div', { class: 'empty' },
-        h('p', { class: 'empty__text', text: own ? 'Nie masz jeszcze życzeń. Dodaj pierwsze, żeby bliscy wiedzieli, co wybrać.' : 'Ta osoba nie dodała jeszcze życzeń. Zajrzyj do pozostałych list.' }),
-        own ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/moje' }, 'Dodaj pierwsze życzenie') : null);
-      if (!own) {
-        const back = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, 'Zobacz pozostałe listy');
-        back.addEventListener('click', () => { row.open = false; row.querySelector('summary').focus(); });
-        empty.append(back);
-      }
-      const slot = h('div', { class: 'wishes-slot' });
-      const fill = () => {
-        const items = getFilter() === 'free' && !own ? data.wishes.filter(w => !w.reserved || w.reservedByMe) : data.wishes;
-        slot.replaceChildren(items.length
-          ? h('ul', { class: 'wishes', role: 'list' }, items.map(w => h('li', null, own ? ownWishCard(w) : otherWishCard(w))))
-          : data.wishes.length ? h('p', { class: 'empty__text', text: 'Wszystkie prezenty są już zajęte. Przełącz na „Wszystkie”, żeby zobaczyć pełną listę.' }) : empty);
-      };
-      const filter = !own && data.wishes.some(w => w.reserved && !w.reservedByMe)
-        ? filterControl([{ value: 'all', label: 'Wszystkie' }, { value: 'free', label: 'Dostępne' }],
-          getFilter, value => { disclosureState.set(filterKey, value === 'free'); fill(); }, member.id) : null;
-      fill();
-      content.replaceChildren(...[
-        data.member.letter.trim() ? h('p', { class: 'person-fold__letter', text: capFirst(data.member.letter) })
-          : h('p', { class: 'muted', text: own ? 'Jeszcze nie masz listu do Mikołaja.' : 'List do Mikołaja jeszcze się pisze.' }),
-        own ? h('a', { class: 'text-link', href: '#/moje' }, 'Edytuj w Moje', icon('arrow-right', 'icon icon--sm')) : null,
-        !own && data.wishes.length ? h('p', { class: 'page-note', text: 'Autor nie widzi rezerwacji ani tego, kto kupuje prezent.' }) : null,
-        filter,
-        slot].filter(Boolean));
-    } catch (err) {
-      if (!row.isConnected || state.me?.user.id !== viewerId || err?.status === 401) return;
-      const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, 'Spróbuj ponownie');
-      retry.addEventListener('click', load);
-      content.replaceChildren(h('p', { role: 'alert', text: messageOf(err) }), retry);
-    } finally {
-      loading = false;
-      content.removeAttribute('aria-busy');
-    }
-  };
-  row.addEventListener('toggle', () => { if (row.open) load(); });
-  queueMicrotask(() => { if (row.isConnected && row.open) load(); });
-  return row;
-}
-
-// ---------- List: treść ----------
-
-function letterBody(text) {
-  const id = uid('letter');
-  const body = h('div', { class: 'letter__body', id },
-    h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
-    h('p', { class: 'letter__text', text }));
-  const long = text.length > 260 || text.split('\n').length > 5;
-  if (!long) return body;
-  body.classList.add('is-clamped');
-  const more = h('button', { type: 'button', class: 'text-btn', 'aria-expanded': 'false', 'aria-controls': id }, 'Czytaj całość');
-  more.addEventListener('click', () => {
-    const open = !body.classList.toggle('is-clamped');
-    more.setAttribute('aria-expanded', String(open));
-    more.textContent = open ? 'Zwiń' : 'Czytaj całość';
-  });
-  return h('div', null, body, more);
-}
-
-// ---------- Mój list ----------
-
-function viewMy({ mine, reservations }) {
-  const jump = h('button', { type: 'button', class: 'text-link', 'data-fkey': 'jump-reservations' },
-    'Moje rezerwacje', h('span', { class: 'section-count', text: String(reservations.length) }), icon('arrow-right', 'icon icon--sm'));
-  jump.addEventListener('click', () => {
-    const target = d.getElementById('my-reservations-h');
-    target.focus({ preventScroll: true });
-    target.scrollIntoView({ block: 'start', behavior: reduceMotion() ? 'instant' : 'smooth' });
-  });
-  const head = pageHead({ title: 'Moje', action: jump });
-  head.classList.add('page-head--mine');
-  return h('div', { class: 'page page--narrow container' },
-    head,
-    viewMine(mine),
-    viewReservations(reservations),
-    !DEMO && state.me.user.isAdmin ? h('p', { class: 'page-foot' }, h('a', { class: 'text-link', href: '#/zaproszenie' }, 'Zaproś bliskich')) : null);
-}
-
-function viewMine({ member, wishes }) {
-  const editor = state.editingLetter && letterNode ? letterNode : (letterNode = letterEditor(member.letter));
-  const list = wishes.length
-    ? h('ul', { class: 'wishes', role: 'list' }, wishes.map(w => h('li', null, ownWishCard(w))))
-    : h('div', { class: 'empty', 'data-empty': 'my-wishes' },
-      h('p', { class: 'empty__text', text: 'Nie masz jeszcze życzeń. Dodaj coś, co ucieszy Cię pod choinką — z linkiem lub bez.' }),
-      addWishButton('empty-add-wish'));
-
-  return h('section', { class: 'my-section', id: 'my-list', 'aria-labelledby': 'my-list-h' },
-    h('h2', { class: 'section-title my-section__title', id: 'my-list-h', text: 'Mój list' }),
-    h('p', { class: 'page-note', text: 'Rodzina widzi ten list i życzenia. Nie zobaczysz, co ktoś dla Ciebie rezerwuje.' }),
-    editor,
-    h('section', { class: 'section', 'aria-labelledby': 'wishes-h' },
-      sectionHead('wishes-h', 'Moje życzenia', wishes.length, wishes.length ? addWishButton('add-wish') : null, 'h3'),
-      list));
-}
-
-function letterEditor(initialText) {
-  let saved = initialText;
-  const root = h('section', { class: 'letter', 'aria-labelledby': 'letter-h' });
-
-  const show = () => {
-    state.editingLetter = false;
-    state.letterDirty = false;
-    const has = saved.trim().length > 0;
-    const editBtn = h('button', {
-      type: 'button', class: 'btn btn--ghost btn--sm', 'data-fkey': 'letter-edit',
-      'aria-label': has ? 'Edytuj list' : 'Napisz list',
-    }, icon('edit', 'icon icon--sm'), has ? 'Edytuj' : 'Napisz');
-    editBtn.addEventListener('click', edit);
-    root.replaceChildren(
-      sectionHead('letter-h', 'List', 0, editBtn),
-      has
-        ? letterBody(saved)
-        : h('p', { class: 'empty__text', text: 'Napisz kilka słów: co Cię cieszy, jaki nosisz rozmiar, czego na pewno nie chcesz.' }));
-  };
-
-  const edit = () => {
-    state.editingLetter = true;
-    letterNode = root;
-    const alert = formAlert();
-    const textarea = h('textarea', {
-      id: 'letter-input', class: 'input letter__input', maxlength: LIMITS.letter, rows: 7,
-      placeholder: 'Piszę, bo…', 'aria-describedby': 'letter-count',
-    });
-    textarea.value = saved;
-    const counter = h('p', { id: 'letter-count', class: 'field__hint' });
-    const save = h('button', { type: 'submit', class: 'btn btn--primary btn--sm' }, 'Zapisz list');
-    const cancel = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Anuluj');
-    const update = () => {
-      counter.textContent = `${textarea.value.length} / ${LIMITS.letter} · Ctrl + Enter zapisuje`;
-      state.letterDirty = textarea.value !== saved;
-    };
-    const finish = () => { show(); $('[data-fkey="letter-edit"]', root)?.focus(); };
-    let busy = false;
-
-    const form = h('form', { class: 'letter__form', novalidate: true },
-      h('p', { class: 'letter__salutation', 'aria-hidden': 'true', text: 'Drogi Mikołaju,' }),
-      h('label', { class: 'sr-only', for: 'letter-input', text: 'Treść listu' }),
-      textarea,
-      counter,
-      alert.el,
-      h('div', { class: 'letter__actions' }, save, cancel));
-    form.addEventListener('submit', async e => {
-      e.preventDefault();
-      if (busy) return;
-      alert.clear();
-      const text = textarea.value.trim();
-      if (text.length > LIMITS.letter) { alert.show(`List może mieć najwyżej ${LIMITS.letter} znaków.`); return; }
-      busy = true; setBusy(save, true); cancel.disabled = true;
-      try {
-        await api('PATCH', '/api/letter', { letter: text });
-        saved = text;
-        finish();
-        toast('List zapisany.', { tone: 'success' });
-        refreshMe().catch(() => {});
-      } catch (err) {
-        if (err?.status !== 401) alert.show(messageOf(err));
-      } finally {
-        busy = false;
-        if (save.isConnected) { setBusy(save, false); cancel.disabled = false; }
-      }
-    });
-    cancel.addEventListener('click', finish);
-    textarea.addEventListener('input', update);
-    textarea.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }
-      else if (e.key === 'Escape' && !state.letterDirty) { e.preventDefault(); finish(); }
-    });
-    update();
-    root.replaceChildren(sectionHead('letter-h', 'List', 0, null), form);
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-  };
-
-  show();
-  return root;
-}
-
-function wishCardBase(w, extraClass = '') {
-  const titleId = uid('w');
-  const hasReservation = Object.hasOwn(w, 'reserved') || extraClass.includes('wish--mine');
-  const status = !hasReservation ? null : w.reservedByMe || extraClass.includes('wish--mine')
-    ? (w.purchased ? 'Kupione' : 'Twoja rezerwacja') : w.reserved ? (w.purchased ? 'Kupione' : 'Zajęte') : 'Dostępny';
-  return rememberDisclosure(h('details', { class: `wish${extraClass ? ` ${extraClass}` : ''}`, 'aria-labelledby': titleId, 'data-wish-id': w.id },
-    h('summary', { class: 'wish__summary', 'data-fkey': `wish-${w.id}` },
-      h('span', { class: 'wish__head' },
-      h('h3', { class: 'wish__title', id: titleId, text: w.title }),
-      w.price !== null ? h('span', { class: 'wish__price' }, h('span', { class: 'sr-only', text: 'Cena: ' }), formatPrice(w.price)) : null),
-      status ? h('span', { class: `tag ${status === 'Twoja rezerwacja' ? 'tag--accent' : 'tag--muted'}`, text: status }) : null,
-      icon('arrow-right', 'icon icon--sm disclosure-arrow')),
-    w.note ? h('p', { class: 'wish__note', text: w.note }) : null,
-    w.url ? h('a', { class: 'wish__link', href: w.url, target: '_blank', rel: 'noopener noreferrer' },
-      h('span', { text: displayHost(w.url) }),
-      icon('external', 'icon icon--xs'),
-      h('span', { class: 'sr-only', text: ' (otwiera się w nowej karcie)' })) : null), `wish:${w.ownerId}:${w.id}`);
-}
-
-function ownWishCard(w) {
-  const card = wishCardBase(w);
-  const edit = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-fkey': `edit-${w.id}`, 'aria-label': `Edytuj: ${w.title}` }, 'Edytuj');
-  const del = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-fkey': `del-${w.id}`, 'aria-label': `Usuń: ${w.title}` }, 'Usuń');
-  edit.addEventListener('click', () => openWishDialog(w));
-  del.addEventListener('click', () => confirmAction({
-    title: 'Usunąć życzenie?',
-    message: `„${w.title}” zniknie z Twojej listy. Tej operacji nie można cofnąć.`,
-    confirmLabel: 'Usuń',
-    action: async () => {
-      await api('DELETE', `/api/wishes/${encodeURIComponent(w.id)}`);
-      await refreshView();
-      toast('Życzenie usunięte.', { tone: 'success' });
-    },
-  }));
-  card.append(h('div', { class: 'wish__foot' }, edit, del));
-  return card;
-}
-
-function openWishDialog(existing) {
-  const editing = Boolean(existing);
-  const fTitle = field({ label: 'Czego sobie życzysz?', name: 'title', required: true, maxlength: LIMITS.title, value: existing?.title, placeholder: 'np. Wełniany szalik', autocomplete: 'off' });
-  const fNote = field({ label: 'Notatka', name: 'note', multiline: true, rows: 3, optional: true, maxlength: LIMITS.note, value: existing?.note, hint: 'Rozmiar, kolor, wariant — co pomoże trafić.' });
-  const fUrl = field({ label: 'Link', name: 'url', type: 'url', inputmode: 'url', optional: true, maxlength: LIMITS.url, value: existing?.url ?? '', placeholder: 'https://…', spellcheck: false, autocapitalize: 'none', autocomplete: 'off' });
-  const fPrice = field({
-    label: 'Cena', name: 'price', inputmode: 'decimal', optional: true, autocomplete: 'off', placeholder: 'np. 149,99',
-    value: existing && existing.price !== null ? priceInputValue(existing.price) : '',
-    trailing: h('span', { class: 'field__suffix', 'aria-hidden': 'true', text: 'zł' }),
-  });
-  const alert = formAlert();
-  const cancel = h('button', { type: 'button', class: 'btn btn--secondary' }, 'Anuluj');
-  const save = h('button', { type: 'submit', class: 'btn btn--primary' }, editing ? 'Zapisz zmiany' : 'Dodaj do listy');
-  const form = h('form', { class: 'form dialog__body', novalidate: true },
-    fTitle.wrap, fNote.wrap,
-    h('div', { class: 'form__row' }, fUrl.wrap, fPrice.wrap),
-    alert.el,
-    h('div', { class: 'dialog__actions' }, cancel, save));
-  const dlg = openDialog({ title: editing ? 'Edytuj życzenie' : 'Nowe życzenie', body: form, initialFocus: () => fTitle.control });
-  cancel.addEventListener('click', () => dlg.close());
-
-  bindSubmit({
-    form, button: save, alert,
-    fields: { title: fTitle, note: fNote, url: fUrl, price: fPrice },
-    onBusy: on => { dlg.setBusy(on); cancel.disabled = on; },
-    validate: v => {
-      const out = {};
-      const title = v.title.trim();
-      if (!title) out.title = 'Wpisz, czego sobie życzysz.';
-      else if (title.length > LIMITS.title) out.title = `Maksymalnie ${LIMITS.title} znaków.`;
-      if (v.note.trim().length > LIMITS.note) out.note = `Maksymalnie ${LIMITS.note} znaków.`;
-      const url = parseUrlInput(v.url);
-      if (url.error) out.url = url.error;
-      const price = parsePriceInput(v.price);
-      if (price.error) out.price = price.error;
-      return out;
-    },
-    run: async v => {
-      const body = {
-        title: v.title.trim(),
-        note: v.note.trim(),
-        url: parseUrlInput(v.url).value,
-        price: parsePriceInput(v.price).value,
-      };
-      if (editing) await api('PATCH', `/api/wishes/${encodeURIComponent(existing.id)}`, body);
-      else await api('POST', '/api/wishes', body);
-      dlg.setBusy(false);
-      dlg.close();
-      await refreshView();
-      toast(editing ? 'Zapisano zmiany.' : `Dodano do Twojego listu: ${body.title}`, { tone: 'success' });
-    },
-  });
-}
-
-// ---------- List innej osoby ----------
-
-function filterControl(options, get, set, scope = '') {
-  const group = h('div', { class: 'segmented segmented--sm', role: 'group', 'aria-label': 'Pokaż życzenia' });
-  const sync = () => { for (const b of group.children) b.setAttribute('aria-pressed', String(b.value === get())); };
-  for (const o of options) {
-    const b = h('button', { type: 'button', class: 'segmented__btn', value: o.value, 'data-fkey': `filter-${scope ? `${scope}-` : ''}${o.value}` }, o.label);
-    b.addEventListener('click', () => { if (get() !== o.value) { set(o.value); sync(); } });
-    group.append(b);
-  }
-  sync();
-  return group;
-}
-
-function purchasedToggle(w) {
-  const btn = h('button', {
-    type: 'button', class: 'check', 'aria-pressed': String(w.purchased),
-    'data-fkey': `buy-${w.id}`, 'aria-label': `Kupione: ${w.title}`,
-  },
-  h('span', { class: 'check__box', 'aria-hidden': 'true' }, icon('check', 'icon icon--xs')),
-  h('span', { text: 'Kupione' }));
-  btn.addEventListener('click', () => act(btn,
-    () => api('PATCH', `/api/wishes/${encodeURIComponent(w.id)}/reserve`, { purchased: !w.purchased }),
-    { success: w.purchased ? `Cofnięto oznaczenie zakupu: ${w.title}` : `Oznaczono jako kupione: ${w.title}` }));
-  return btn;
-}
-
-function cancelReservationButton(w) {
-  const btn = h('button', {
-    type: 'button', class: 'btn btn--ghost btn--sm',
-    'data-fkey': `cancel-${w.id}`, 'aria-label': `Zrezygnuj z rezerwacji: ${w.title}`,
-  }, 'Zrezygnuj');
-  const run = () => api('DELETE', `/api/wishes/${encodeURIComponent(w.id)}/reserve`);
-  btn.addEventListener('click', () => {
-    if (w.purchased) {
-      confirmAction({
-        title: 'Zrezygnować z rezerwacji?',
-        message: `„${w.title}” jest oznaczone jako kupione. Po rezygnacji prezent znów będzie wolny i ktoś inny może go zarezerwować.`,
-        confirmLabel: 'Zrezygnuj',
-        action: async () => { await run(); await refreshView(); toast(`Zwolniono rezerwację: ${w.title}`, { tone: 'success' }); },
-      });
-    } else {
-      act(btn, run, { success: `Zwolniono rezerwację: ${w.title}` });
-    }
-  });
-  return btn;
-}
-
-function changedNote(text, link) {
-  return h('p', { class: 'inline-note', role: 'note' },
-    icon('info', 'icon icon--sm'),
-    h('span', null, text, link ? ' ' : null, link));
-}
-
-function otherWishCard(w) {
-  if (!w.reserved) {
-    const card = wishCardBase(w);
-    const reserve = h('button', {
-      type: 'button', class: 'btn btn--primary btn--sm',
-      'data-fkey': `res-${w.id}`, 'aria-label': `Zarezerwuj: ${w.title}`,
-    }, 'Zarezerwuj');
-    reserve.addEventListener('click', () => act(reserve,
-      () => api('POST', `/api/wishes/${encodeURIComponent(w.id)}/reserve`, {}),
-      { success: `Zarezerwowano: ${w.title}. Nikt nie dowie się, że to Ty.` }));
-    card.append(h('div', { class: 'wish__foot' }, reserve));
-    return card;
-  }
-  if (w.reservedByMe) {
-    // Zakup dotyczy wersji z chwili rezerwacji — nie przypisujemy go zmienionemu życzeniu.
-    const changed = w.changedSinceReservation === true;
-    const card = wishCardBase(w, 'wish--mine');
-    if (changed) {
-      card.append(changedNote('Zmienione po Twojej rezerwacji. Wersja z chwili rezerwacji i status zakupu są w zakładce',
-        h('a', { class: 'text-link text-link--inline', href: '#/moje' }, 'Moje rezerwacje')));
-    }
-    card.append(h('div', { class: 'wish__foot' },
-      changed ? null : purchasedToggle(w),
-      cancelReservationButton(w)));
-    return card;
-  }
-  return wishCardBase(w, 'wish--taken');
-}
-
-// ---------- Moje prezenty ----------
-
-function viewReservations(wishes) {
-  const note = quiet('lock', 'Inni widzą tylko, że prezent jest zajęty — nie wiedzą, przez kogo.');
-  const heading = meta => h('header', { class: 'my-section__head' },
-    h('h2', { class: 'section-title', id: 'my-reservations-h', tabindex: '-1', text: 'Moje rezerwacje' }),
-    meta ? h('p', { class: 'page-meta', text: meta }) : null,
-    h('p', { class: 'page-note' }, note));
-  if (!wishes.length) {
-    return h('section', { class: 'my-section', id: 'my-reservations', 'aria-labelledby': 'my-reservations-h' },
-      heading(null),
-      h('div', { class: 'empty', 'data-empty': 'reservations' },
-        h('p', { class: 'empty__text', text: 'Nie masz jeszcze rezerwacji. Otwórz listę bliskiej osoby i wybierz prezent.' }),
-        h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Przejrzyj listy')));
-  }
-
-  const bought = wishes.filter(w => w.purchased).length;
-  const priced = wishes.filter(w => w.price !== null);
-  const sum = Math.round(priced.reduce((s, w) => s + w.price, 0) * 100) / 100;
-  const unpriced = wishes.length - priced.length;
-  let meta = `${count(wishes.length, FORMS.gift)} · kupione: ${bought} z ${wishes.length}`;
-  if (priced.length) meta += ` · razem ${formatPrice(sum)}${unpriced ? ` (bez ceny: ${unpriced})` : ''}`;
-
-  const groups = new Map();
-  for (const w of wishes) {
-    const key = w.ownerId || w.ownerName;
-    if (!groups.has(key)) groups.set(key, { ownerId: w.ownerId, ownerName: w.ownerName, items: [] });
-    groups.get(key).items.push(w);
-  }
-
-  const sections = [...groups.values()].map(g => {
-    const headingId = uid('g');
-    return h('section', { class: 'section', 'aria-labelledby': headingId },
-      sectionHead(headingId, g.ownerName, g.items.length,
-        g.ownerId ? h('a', { class: 'text-link', href: `#/osoba/${encodeURIComponent(g.ownerId)}` }, 'Otwórz list', h('span', { class: 'sr-only', text: `: ${g.ownerName}` })) : null),
-      h('ul', { class: 'wishes', role: 'list' }, g.items.map(w => h('li', null, reservedWishCard(w)))));
-  });
-
-  return h('section', { class: 'my-section', id: 'my-reservations', 'aria-labelledby': 'my-reservations-h' },
-    heading(meta),
-    sections);
-}
-
-function reservedWishCard(w) {
-  const card = wishCardBase(w, 'wish--mine');
-  if (w.changedSinceReservation) {
-    card.append(changedNote('Autor zmienił to życzenie. Tu widać wersję z chwili rezerwacji.',
-      w.ownerId
-        ? h('a', { class: 'text-link text-link--inline', href: `#/osoba/${encodeURIComponent(w.ownerId)}` },
-          'Zobacz aktualną', h('span', { class: 'sr-only', text: `: ${w.ownerName}` }))
-        : null));
-  }
-  card.append(h('div', { class: 'wish__foot' }, purchasedToggle(w), cancelReservationButton(w)));
-  return card;
-}
-
-// ---------- Zaproszenia ----------
-
-function viewInvite() {
-  const { user, family } = state.me;
-  const back = h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Listy bliskich');
-  if (DEMO) {
-    return h('div', { class: 'page page--narrow container' },
-      pageHead({ title: 'Zaproszenia', meta: 'W podglądzie zaproszenia są wyłączone — to przykładowa rodzina.' }), back);
-  }
-  if (!user.isAdmin) {
-    return h('div', { class: 'page page--narrow container' },
-      pageHead({ title: 'Zaproszenia', meta: 'Link zaproszenia udostępnia osoba, która założyła rodzinę. Poproś ją o link.' }), back);
-  }
-
-  const area = h('div', { class: 'invite__area' });
-  renderInviteArea(area);
-
-  const rotate = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-fkey': 'invite-rotate' }, icon('refresh', 'icon icon--sm'), 'Wygeneruj nowy link');
-  rotate.addEventListener('click', () => confirmAction({
-    title: 'Wygenerować nowy link?',
-    message: 'Poprzedni link przestanie działać — nikt już przez niego nie dołączy. Nowy link trzeba będzie wysłać ponownie.',
-    confirmLabel: 'Wygeneruj nowy link',
-    action: async () => {
-      state.inviteUrl = normInviteUrl(await api('POST', '/api/invite', {}));
-      await refreshView();
-      toast('Nowy link gotowy. Poprzedni już nie działa.', { tone: 'success' });
-    },
-  }));
-
-  return h('div', { class: 'page page--narrow container' },
-    pageHead({ title: 'Zaproś bliskich', meta: `Osoba z linkiem może dołączyć do rodziny „${family.name}”.` }),
-    h('section', { class: 'panel', 'aria-labelledby': 'invite-h' },
-      h('h2', { class: 'section-title', id: 'invite-h', text: 'Link zaproszenia' }),
-      h('p', { class: 'muted', text: 'Wyślij go tylko bliskim, SMS-em lub w komunikatorze. Mikołaj nie wysyła e-maili.' }),
-      area),
-    h('section', { class: 'panel panel--quiet', 'aria-labelledby': 'rotate-h' },
-      h('h2', { class: 'section-title', id: 'rotate-h', text: 'Link trafił w niepowołane ręce?' }),
-      h('p', { class: 'muted', text: 'Wygeneruj nowy. Poprzedni od razu przestanie działać; konta, które już dołączyły, zostaną.' }),
-      h('div', null, rotate)));
-}
-
-function renderInviteArea(area) {
-  if (!state.inviteUrl) {
-    const alert = formAlert();
-    const reveal = h('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-fkey': 'invite-reveal' }, icon('eye', 'icon icon--sm'), 'Pokaż link');
-    reveal.addEventListener('click', async () => {
-      if (reveal.disabled) return;
-      alert.clear();
-      setBusy(reveal, true);
-      try {
-        state.inviteUrl = normInviteUrl(await api('GET', '/api/invite'));
-        renderInviteArea(area);
-        $('#invite-url', area)?.focus();
-      } catch (err) {
-        if (err?.status !== 401) alert.show(messageOf(err));
-      } finally {
-        if (reveal.isConnected) setBusy(reveal, false);
-      }
-    });
-    area.replaceChildren(h('div', null, reveal), alert.el);
-    return;
-  }
-
-  const url = state.inviteUrl;
-  const input = h('input', { id: 'invite-url', class: 'input input--mono', type: 'text', readonly: true, spellcheck: 'false', autocomplete: 'off', 'aria-describedby': 'invite-url-hint' });
-  input.value = url;
-  input.addEventListener('focus', () => input.select());
-
-  const copy = h('button', { type: 'button', class: 'btn btn--primary', 'data-fkey': 'invite-copy' }, icon('copy', 'icon icon--sm'), h('span', { text: 'Kopiuj' }));
-  let resetTimer = 0;
-  copy.addEventListener('click', async () => {
-    const ok = await copyText(url, input);
-    if (ok) {
-      copy.replaceChildren(icon('check', 'icon icon--sm'), h('span', { text: 'Skopiowano' }));
-      clearTimeout(resetTimer);
-      resetTimer = setTimeout(() => { if (copy.isConnected) copy.replaceChildren(icon('copy', 'icon icon--sm'), h('span', { text: 'Kopiuj' })); }, 2200);
-      toast('Link skopiowany. Wyślij go bliskim w prywatnej wiadomości.', { tone: 'success' });
-    } else {
-      input.focus();
-      input.select();
-      toast('Nie udało się skopiować automatycznie. Link jest zaznaczony — skopiuj go ręcznie.', { tone: 'error' });
-    }
-  });
-
-  const more = h('div', { class: 'invite__more' });
-  if (typeof navigator.share === 'function') {
-    const share = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, icon('share', 'icon icon--sm'), 'Udostępnij');
-    share.addEventListener('click', async () => {
-      try {
-        await navigator.share({ title: 'Zaproszenie do Mikołaja', text: `Dołącz do rodziny „${state.me.family.name}” w Mikołaju.`, url });
-      } catch (err) {
-        if (err?.name !== 'AbortError') toast('Nie udało się otworzyć udostępniania. Skopiuj link ręcznie.', { tone: 'error' });
-      }
-    });
-    more.append(share);
-  }
-  const hide = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, icon('eye-off', 'icon icon--sm'), 'Ukryj link');
-  hide.addEventListener('click', () => {
-    state.inviteUrl = null;
-    renderInviteArea(area);
-    $('[data-fkey="invite-reveal"]', area)?.focus();
-  });
-  more.append(hide);
-
-  area.replaceChildren(
-    h('label', { class: 'field__label', for: 'invite-url', text: 'Link zaproszenia' }),
-    h('div', { class: 'copy-row' }, input, copy),
-    h('p', { id: 'invite-url-hint', class: 'field__hint', text: 'Działa, dopóki nie wygenerujesz nowego.' }),
-    more);
-}
-
-async function copyText(text, input) {
-  try {
-    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
-  } catch { /* przechodzimy do zapasowej metody */ }
-  try {
-    input.focus();
-    input.select();
-    return d.execCommand('copy');
-  } catch { return false; }
-}
-
-// ---------- Zdarzenia globalne ----------
-
-function isInteracting() {
-  if (d.querySelector('dialog[open]')) return true;
-  if (state.editingLetter || inflight > 0) return true;
-  const active = d.activeElement;
-  return Boolean(active && active.matches('input, textarea, select') && mainEl().contains(active));
-}
-
-function anyFieldFilled() {
-  return [...mainEl().querySelectorAll('input, textarea')].some(el => el.value);
-}
-
-function onHashChange() {
-  const link = readLinkFragment();
-  if (DEMO && link) {
-    // Prawdziwy link #setup= / #invite= otwiera chronioną aplikację; podgląd go nie obsługuje.
-    location.reload();
-    return;
-  }
-  if (!state.me) {
-    if (link) {
-      applyLink(link);
-      renderWelcome();
-      if (state.tokens.invite) checkInvitation();
-    }
-    return;
-  }
-  if (link) {
-    state.pendingLink = link.token ? link : null;
-    history.replaceState(null, '', state.appHash || location.pathname + location.search);
-    renderPendingNotice();
-    if (!link.token) toast('Ten link jest niekompletny albo uszkodzony.', { tone: 'error' });
-    return;
-  }
-  if (state.letterDirty) {
-    const target = location.hash;
-    history.replaceState(null, '', state.appHash || location.pathname + location.search);
-    confirmAction({
-      title: 'Porzucić zmiany w liście?',
-      message: 'Masz niezapisane zmiany w liście. Jeśli przejdziesz dalej, przepadną.',
-      confirmLabel: 'Porzuć zmiany',
-      action: async () => {
-        state.letterDirty = false;
-        state.editingLetter = false;
-        location.hash = target;
-      },
-    });
-    return;
-  }
-  renderRoute();
-}
-
-async function onVisible() {
-  if (d.visibilityState !== 'visible' || state.booting) return;
-  if (Date.now() - state.lastVisibleRefresh < 4000) return;
-  state.lastVisibleRefresh = Date.now();
-  if (state.me) {
-    if (!isInteracting()) renderRoute({ quiet: true, silent: true });
-    return;
-  }
-  if (DEMO || anyFieldFilled() || state.tokens.invite || state.tokens.setup) return;
-  try {
-    const me = normSession(await api('GET', '/api/me'));
-    if (me && !state.me && !anyFieldFilled()) onAuthenticated(me, false, { silent: true });
-  } catch { /* cicho — to tylko odświeżenie w tle */ }
-}
-
-function bindGlobal() {
-  window.addEventListener('hashchange', onHashChange);
-  d.addEventListener('visibilitychange', onVisible);
-  window.addEventListener('beforeunload', e => {
-    if (state.letterDirty) { e.preventDefault(); e.returnValue = ''; }
-  });
-  d.getElementById('logout-btn').addEventListener('click', e => logout(e.currentTarget));
-  $('.skip-link').addEventListener('click', e => { e.preventDefault(); focusHeading(); });
-}
-
-// ---------- Tryb podglądu UX ----------
-
-let demoSelect = null;
-
-const demoCueText = status => (status.persistent ? 'Podgląd · zapis lokalny' : 'Podgląd · tylko ta karta');
-function demoNoteText(status) {
-  return status.persistent
-    ? 'Dane przykładowe. Zmiany zapisują się tylko w tej przeglądarce, bez synchronizacji — rodzina ich nie widzi.'
-    : 'Dane przykładowe. Pamięć przeglądarki jest niedostępna: zmiany znikną po zamknięciu karty.';
-}
-
-// Narzędzia powstają raz, w nagłówku; odświeżanie widoków nie dotyka listy wyboru ani fokusu.
-function mountDemoTools(status) {
-  if (d.getElementById('demo-tools')) return false;
-  const cue = d.getElementById('brand-family');
-  cue.textContent = demoCueText(status);
-  cue.hidden = false;
-
-  const note = h('p', { class: 'demo__note', text: demoNoteText(status) });
-  demoSelect = h('select', { id: 'demo-as', class: 'demo__select', name: 'demo-as' },
-    demoPeople().map(p => h('option', { value: p.id, text: p.name })));
-  demoSelect.value = demoActiveId();
-  demoSelect.addEventListener('change', () => switchDemoPerson(demoSelect.value));
-
-  const summary = h('summary', { class: 'icon-btn demo__toggle', 'aria-label': 'Podgląd: informacje i reset' }, icon('more'));
-  const reset = h('button', { type: 'button', class: 'btn btn--secondary btn--sm btn--block' },
-    icon('refresh', 'icon icon--sm'), 'Przywróć dane przykładowe');
-  const menu = h('details', { class: 'demo__menu' }, summary,
-    h('div', { class: 'demo__panel' },
-      h('p', { class: 'demo__title', text: 'Podgląd rodzinnych listów' }),
-      note,
-      reset));
-  reset.addEventListener('click', () => { menu.open = false; summary.focus(); confirmDemoReset(); });
-  menu.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && menu.open) { e.preventDefault(); menu.open = false; summary.focus(); }
-  });
-  d.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
-
-  onDemoStatus(next => {
-    cue.textContent = demoCueText(next);
-    const text = demoNoteText(next);
-    if (note.textContent !== text) note.textContent = text;
-    if (!next.persistent) toast('Nie udało się zapisać w pamięci przeglądarki. Zmiany zostają tylko w tej karcie.', { tone: 'error' });
-  });
-
-  d.getElementById('tools').prepend(h('div', { class: 'demo', id: 'demo-tools' },
-    h('label', { class: 'demo__label', for: 'demo-as', text: 'Podgląd jako' }),
-    demoSelect,
-    menu));
-  return true;
-}
-
-async function showDemoPerson(message) {
-  state.editingLetter = false;
-  state.letterDirty = false;
-  state.inviteUrl = null;
-  letterNode = null;
-  const me = normSession(await api('GET', '/api/me'));
-  if (!me) throw bad();
-  state.me = me;
-  if (demoSelect) demoSelect.value = me.user.id;
-  if (location.hash !== '#/') history.pushState(null, '', '#/');
-  // Fokus zostaje na liście wyboru; zmianę ogłasza powiadomienie.
-  renderApp({ initial: true });
-  toast(message(me), { tone: 'success' });
-}
-
-function switchDemoPerson(id) {
-  const prev = demoActiveId();
-  if (id === prev) return;
-  const go = async () => {
-    if (!setDemoActive(id)) throw new ApiError('Nie ma takiej osoby w danych przykładowych.', 404);
-    await showDemoPerson(me => `Podgląd jako ${firstName(me.user.name)}.`);
-  };
-  if (state.letterDirty) {
-    demoSelect.value = prev;
-    const who = demoPeople().find(p => p.id === id)?.name || 'inną osobę';
-    confirmAction({
-      title: 'Porzucić zmiany w liście?',
-      message: `Masz niezapisane zmiany w liście. Jeśli przełączysz podgląd na: ${who}, przepadną.`,
-      confirmLabel: 'Porzuć i przełącz',
-      action: go,
-    });
-    return;
-  }
-  go().catch(err => {
-    demoSelect.value = demoActiveId();
-    toast(messageOf(err), { tone: 'error' });
-  });
-}
-
-function confirmDemoReset() {
-  confirmAction({
-    title: 'Przywrócić dane przykładowe?',
-    message: `${state.letterDirty ? 'Masz niezapisane zmiany w liście — przepadną. ' : ''}Wszystkie zmiany w podglądzie w tej przeglądarce zostaną usunięte. Prawdziwych danych rodziny to nie dotyczy.`,
-    confirmLabel: 'Przywróć',
-    action: async () => {
-      resetDemo();
-      for (const node of mainEl().querySelectorAll('details[data-disclosure]')) node.open = false;
-      disclosureState.clear();
-      await showDemoPerson(() => 'Przywrócono dane przykładowe.');
-    },
-  });
-}
-
-async function bootDemo() {
-  const status = initDemo();
-  if (mountDemoTools(status) && status.recovered) {
-    toast('Zapisane dane podglądu były uszkodzone — przywrócono dane przykładowe.', { tone: 'info' });
-  }
-  const me = normSession(await api('GET', '/api/me'));
-  if (!me) throw bad();
-  state.me = me;
-  if (demoSelect) demoSelect.value = me.user.id;
-  renderApp();
-}
-
-// ---------- Start ----------
-
-function viewBootError(err) {
-  const retry = h('button', { type: 'button', class: 'btn btn--primary' }, icon('refresh', 'icon icon--sm'), 'Spróbuj ponownie');
-  retry.addEventListener('click', () => { mainEl().replaceChildren(viewLoading()); boot(); });
-  return stateView('Nie udało się połączyć', messageOf(err), [retry]);
-}
-
-async function boot() {
-  state.booting = true;
-  if (DEMO) {
-    try {
-      await bootDemo();
-    } catch (err) {
-      showShell(false);
-      mainEl().replaceChildren(viewBootError(err));
-    } finally {
-      state.booting = false;
-    }
-    return;
-  }
-  const link = readLinkFragment();
-  try {
-    const me = normSession(await api('GET', '/api/me'));
-    if (me) {
-      if (link) {
-        state.pendingLink = link.token ? link : null;
-        clearFragment();
-      }
-      state.me = me;
-      renderApp();
-    } else {
-      applyLink(link);
-      renderWelcome();
-      if (state.tokens.invite) checkInvitation();
-    }
-  } catch (err) {
-    showShell(false);
-    mainEl().replaceChildren(viewBootError(err));
-  } finally {
-    state.booting = false;
-  }
-}
-
-bindGlobal();
-boot();
+start();

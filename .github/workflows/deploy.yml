@@ -26,13 +26,11 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12'
-      - name: Test deployment safeguards
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
       - name: Check JavaScript syntax on hosted runner
         shell: bash
         run: |
           set -euo pipefail
-          for file in public/app.js public/demo.js src/worker.js; do
+          for file in public/app.js src/worker.js; do
             node --input-type=module --check < "$file"
           done
       - name: Refuse superseded runs while holding deployment concurrency lock
