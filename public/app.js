@@ -344,9 +344,11 @@ function vAuth() {
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
   </section>`;
-  return `<section class="auth fade">
-    <h1 class="title">Mikołaj</h1>
-    <p class="sub">Rodzinne listy do Mikołaja.</p>
+  if (S.screen !== 'login') return vLanding();
+  return `<header class="head pub"><button class="mark" data-go="landing">Mikołaj</button></header>
+  <section class="auth fade">
+    <h1 class="title">Zaloguj się</h1>
+    <p class="sub">Do rodzinnych list do Mikołaja.</p>
     <form class="form" data-form="login">
       <input class="in" name="email" type="email" placeholder="E-mail" required autocomplete="email">
       <input class="in" name="password" type="password" placeholder="Hasło" required autocomplete="current-password">
@@ -356,12 +358,38 @@ function vAuth() {
   </section>`;
 }
 
+// strona startowa dla niezalogowanych
+function vLanding() {
+  const d = daysToEve();
+  const point = (h, t) => `<div class="point"><h3>${h}</h3><p>${t}</p></div>`;
+  return `<header class="head pub">
+    <button class="mark" data-go="landing">Mikołaj</button>
+    <button class="a" data-go="login">Zaloguj się</button>
+  </header>
+  <section class="landing fade">
+    <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
+    <p class="lead">Każdy pisze, czego by chciał. Bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego — a niespodzianka zostaje niespodzianką.</p>
+    <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
+    <p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p>
+    <h2 class="label">Jak to działa</h2>
+    ${point('Każdy pisze list', 'Kilka zdań do Mikołaja i życzenia — od drobnostek do 50 zł po „byłem aniołkiem”.')}
+    ${point('Bliscy wybierają prezent', '„Kupię to” rezerwuje prezent, więc nikt nie kupi go drugi raz.')}
+    ${point('Niespodzianka zostaje niespodzianką', 'Nie widzisz, co inni kupują dla Ciebie. Widzisz tylko swoje zakupy.')}
+    ${point('Także za dziadków i dzieci', 'Osobę bez telefonu prowadzi ktoś z rodziny: wpisuje za nią list i życzenia.')}
+    <h2 class="label">Dla kogo</h2>
+    <p class="fam-text">Aplikacja jest prywatna, dla jednej rodziny. Konto zakłada się z linku zaproszenia od organizatora.</p>
+    <div class="actions mt"><button class="a solid" data-go="login">Zaloguj się</button></div>
+  </section>`;
+}
+
 /* ===================== RENDER ===================== */
 const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
+const PUBLIC = { landing: '#/', login: '#/zaloguj' };
 function render(animate = false) {
   const y = window.scrollY;
   const loggedIn = S.data?.user;
   if (loggedIn && !TABS[S.screen]) S.screen = 'lists';
+  if (!loggedIn && !['login', 'join', 'link'].includes(S.screen)) S.screen = 'landing';
   if (S.screen === 'family' && !me()?.isAdmin) S.screen = 'lists';
   const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily }[S.screen]();
   $('#app').innerHTML = view;
@@ -371,7 +399,8 @@ function render(animate = false) {
 }
 function go(screen) {
   Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null });
-  if (TABS[screen]) history.replaceState(null, '', TABS[screen]);
+  const hash = (S.data?.user ? TABS : PUBLIC)[screen];
+  if (hash) history.replaceState(null, '', hash);
   window.scrollTo(0, 0);
   render(true);
   if (screen === 'family') act(() => {});
@@ -448,7 +477,7 @@ document.addEventListener('click', e => {
       return syncAll(); }
     case 'menu': S.menu = !S.menu; $('.menu').classList.toggle('open', S.menu); t.setAttribute('aria-expanded', S.menu); return;
     case 'theme': setTheme({ auto: 'light', light: 'dark', dark: 'auto' }[theme]); return render();
-    case 'logout': return act(async () => { await api('logout', 'POST'); S.screen = 'login'; history.replaceState(null, '', '#/'); }, null);
+    case 'logout': return act(async () => { await api('logout', 'POST'); S.screen = 'landing'; history.replaceState(null, '', '#/'); }, null);
     case 'confirm-cancel': S.confirm = null; return render();
     case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
@@ -554,7 +583,7 @@ async function start() {
       if (token[1] === 'link') { S.info = await api(`link/${S.token}`); S.screen = 'link'; }
     } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message), 0); }
   } else {
-    S.screen = Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
+    S.screen = hash === PUBLIC.login ? 'login' : Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
   }
   try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message); }
   // Zalogowany, ale otwiera link? Najpierw link — po zapisaniu wraca do aplikacji.
