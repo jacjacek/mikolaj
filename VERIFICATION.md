@@ -2,7 +2,17 @@
 
 Verified against the real isolated Cloudflare Worker, not local mocks. No dependency installation, compilation, bundling, Node/TypeScript linting or local server was used on Mikrus. The browser executed the deployed JavaScript.
 
-## Latest UI: two tabs and nested disclosures
+## Latest UI: Christmas palette and Świdermajer-inspired identity
+
+The seasonal redesign passed **40/40 checks** on the deployed isolated preview, including all 33 two-tab regression checks below. The seven theme checks verify pine/burgundy instead of lime, primary-action contrast (**10.48:1**), actual intermediate height/opacity while opening and closing at 10% playback speed, rapid toggle recovery, reduced motion, and no collected runtime/CSP errors. Report: `tests/results/falenica-preview.json`.
+
+Actual preview screenshots were visually inspected at **390×844**, **320×740** and **1440×1000**, including Listy, Moje and the accordion transition. Native details remain the fallback when newer CSS animation capabilities are unavailable. No Safari runtime pass is claimed. Application JavaScript, demo storage key/data schema, backend, authorization, bootstrap and Durable Object identities are unchanged.
+
+An independent review found and fixed an older-browser reduced-motion regression: unsupported pseudo-elements must not share the ordinary universal selector list. The generic overrides are now separate from the guarded `::details-content` rule. A targeted real-browser CSS parser regression replaced that pseudo-element with an unsupported name; all four decorative elements still computed `.01ms` duration and zero delay (`tests/results/falenica-fallback.json`). This is not a Safari runtime test. The complete post-fix preview suite passed **40/40** again. New-document error instrumentation is now installed before navigation, not after initial load.
+
+Earlier browser startup failures were environmental, not counted as passing checks. Cleaning up this task's completed browser-harness daemons restored a complete run; a redundant rerun had failed before Chromium exposed its debugging port and executed no UI checks. Hidden/background targets also throttled motion sampling; the complete suite activates its isolated target. Production publication and read-back of this redesign are pending the final independent review.
+
+## Historical UI: two tabs and nested disclosures
 
 `tests/ui_two_tabs.py` passed **33/33 checks** against the real isolated Cloudflare preview. The suite verifies exactly two primary tabs, the combined own-letter/wishes/reservations page, independent person accordions and nested gift details, preserving expanded state during reservation and purchase, contextual onboarding for each missing-content combination, all own empty-state CTAs and another person's empty list, snapshots and recipient privacy scoped to the own-wishes section, unsaved-letter protection, safe literal note rendering and Polish pricing, real reload persistence, old-link compatibility, local reset, zero private API requests and zero collected runtime/CSP errors. Mobile layouts at 390×844 and 320×740 and desktop at 1440×1000 passed overflow checks. The complete report is `tests/results/two-tabs-preview.json`.
 

@@ -1,0 +1,26 @@
+{
+  "unsupportedPseudoRecognized": false,
+  "values": [
+    {
+      "element": "brand__star",
+      "duration": "1e-05s",
+      "delay": "0s"
+    },
+    {
+      "element": "brand__window",
+      "duration": "1e-05s",
+      "delay": "0s"
+    },
+    {
+      "element": "brand__line",
+      "duration": "1e-05s",
+      "delay": "0s"
+    },
+    {
+      "element": "veranda-frieze container",
+      "duration": "1e-05s",
+      "delay": "0s"
+    }
+  ],
+  "passed": true
+}

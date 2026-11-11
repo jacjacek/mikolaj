@@ -8,7 +8,9 @@ Na czas pracy nad UX adres główny (`/` i trasy `#/…`) otwiera od razu **przy
 
 ## Wygląd i UX
 
-Minimalistyczny, redakcyjny interfejs: neutralne tło `#f0f0eb`, czarny tusz, szeryfowe nagłówki (Newsreader) i Inter w interfejsie, płaskie białe karty bez cieni i dekoracji, jeden drobny cytrynowy akcent `#ddec61` (aktywna zakładka, „Twój list”, „Twoja rezerwacja”). Bez motywu świątecznego, kopert, pieczęci i ilustracji.
+Minimalistyczny świąteczny interfejs: ciepła biel `#f8f6f0`, sosnowa zieleń `#214537` i bordowy akcent `#8a3444`. Szeryfowy Newsreader w nagłówkach i liście, Lato w obsłudze aplikacji. Zamiast zestawu zaokrąglonych kart — spokojne wiersze, cienkie podziały i mniejsze, bardziej użytkowe tytuły prezentów. Autorski znak drewnianej werandy z gwiazdą i rozświetlonym oknem oraz delikatny fryz odwołują się do świdermajerów linii otwockiej; nie są kopią wzoru z fotografii ani deklaracją ustalonego miejsca Wigilii.
+
+Znak i fryz pojawiają się raz po otwarciu aplikacji. Osoby i szczegóły prezentów płynnie rozwijają się i zwijają; przejścia można przerwać kolejnym kliknięciem. Natywne `details` zachowują zwykłe działanie w starszych przeglądarkach, bez zależności od obsługi nowych animacji CSS. `prefers-reduced-motion` usuwa opóźnienia i skraca animacje. Bez padającego śniegu, animacji w pętli, pergaminowych tekstur i dodatkowego dużego banera.
 
 - Dokładnie **dwie zakładki**: **Listy** (`#/`) i **Moje** (`#/moje`). Zaproszenia pozostają narzędziem administratora, nie trzecią zakładką.
 - **Listy**: zwijane/rozwijane osoby, a w środku ich list i zwijane szczegóły każdego prezentu. Dane listy są pobierane dopiero po rozwinięciu osoby. Można rozwinąć kilka osób niezależnie; rezerwacja i zakup nie zwijają otwartych elementów. Cena i status prezentu są widoczne również po zwinięciu. Filtr dostępności działa niezależnie dla każdej osoby.
@@ -26,7 +28,7 @@ Minimalistyczny, redakcyjny interfejs: neutralne tło `#f0f0eb`, czarny tusz, sz
 
 ## Architektura
 
-- Frontend: HTML, CSS i JavaScript bez zależności ani procesu budowania. Design przygotowany z Claude Code / Opus 5.5.
+- Frontend: HTML, CSS i JavaScript bez zależności ani procesu budowania. Pierwotny projekt powstał z pomocą Claude Code; bieżący kierunek świąteczny opisuje `FALENICA_DESIGN_BRIEF.md`.
 - Backend: Cloudflare Worker, Web Crypto, SQLite-backed Durable Object.
 - W trybie live dane znajdują się w Cloudflare, nie w localStorage i nie na Mikrusie. (localStorage służy wyłącznie danym przykładowym podglądu UX.)
 - Jedna rodzina na instalację. Utworzenie rodziny wymaga prywatnego, jednorazowo używanego linku startowego. Administrator zaprasza kolejnych członków osobnym linkiem, który może unieważnić.
@@ -65,4 +67,6 @@ python tests/live_api.py https://mikolaj-preview.SUBDOMAIN.workers.dev /sciezka/
 
 Testy tworzą jednorazową rodzinę i konta testowe w pustym podglądzie; skrypt odmawia działania na domenie produkcyjnej. Weryfikują logowanie, listy, autoryzację, CSRF, niebezpieczne URL, wyścig rezerwacji, anulowanie, status zakupów, rotację zaproszeń i brak ujawnienia rezerwacji autorowi listy. Testowych sesji nie wolno publikować.
 
-Testy powyżej dotyczą API trybu live. Regresje podglądu UX sprawdza `tests/ui_two_tabs.py`: 33 kontrole na zdalnym wdrożeniu, na świeżym profilu Chromium (`tests/ui_minimal.py` jest zgodnym wstecznie punktem wejścia do tej samej aktualnej suity). Test wymaga już dostępnych Chromium i Python `websockets`; nie instaluje zależności aplikacji i nie uruchamia lokalnego serwera. `CHROMIUM_EXECUTABLE` wskazuje istniejącą przeglądarkę, `MIKOLAJ_QA_OUTPUT` opcjonalny katalog raportu, a argument skryptu opcjonalny adres wdrożenia (domyślnie izolowany preview). Wyniki zatwierdzonej wersji są w `tests/results/two-tabs-preview.json`; starszy raport opisuje poprzedni układ. Widok mobilny i główne interakcje sprawdzaj na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.
+Testy powyżej dotyczą API trybu live. Regresje podglądu UX sprawdza `tests/ui_two_tabs.py`: 33 podstawowe kontrole na zdalnym wdrożeniu, na świeżym profilu Chromium (`tests/ui_minimal.py` pozostaje zgodnym wstecznie punktem wejścia). `MIKOLAJ_QA_SEASONAL=1` rozszerza przebieg do **40 kontroli**, dodając paletę, kontrast przycisku, rzeczywisty ruch otwierania i zamykania przy 10% prędkości, szybkie przełączanie oraz ograniczenie ruchu. `MIKOLAJ_QA_THEME_ONLY=1` uruchamia tylko kontrole sezonowe.
+
+Test wymaga już dostępnych Chromium i Python `websockets`; nie instaluje zależności aplikacji i nie uruchamia lokalnego serwera. `CHROMIUM_EXECUTABLE` wskazuje istniejącą przeglądarkę, `MIKOLAJ_QA_OUTPUT` opcjonalny katalog raportu, a argument skryptu opcjonalny adres wdrożenia (domyślnie izolowany preview). Bieżący raport: `tests/results/falenica-preview.json`; wcześniejsze raporty dotyczą wcześniejszych wersji. Widok mobilny i główne interakcje sprawdzaj na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.
