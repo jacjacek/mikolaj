@@ -1,0 +1,60 @@
+{
+  "deployment": "https://mikolaj.walasek.xyz",
+  "passed": 13,
+  "total": 13,
+  "allPassed": true,
+  "checks": [
+    {
+      "check": "app.css matches local source bytes",
+      "passed": true
+    },
+    {
+      "check": "app.css has correct MIME type",
+      "passed": true
+    },
+    {
+      "check": "app.js matches local source bytes",
+      "passed": true
+    },
+    {
+      "check": "app.js has correct MIME type",
+      "passed": true
+    },
+    {
+      "check": "demo.js matches local source bytes",
+      "passed": true
+    },
+    {
+      "check": "demo.js has correct MIME type",
+      "passed": true
+    },
+    {
+      "check": "favicon.svg matches local source bytes",
+      "passed": true
+    },
+    {
+      "check": "favicon.svg has correct MIME type",
+      "passed": true
+    },
+    {
+      "check": "HTML returns the seasonal identity and exactly two tabs",
+      "passed": true
+    },
+    {
+      "check": "app module has a matching CSP nonce without unsafe-inline",
+      "passed": true
+    },
+    {
+      "check": "production SQLite health is OK",
+      "passed": true
+    },
+    {
+      "check": "anonymous me stays unauthenticated",
+      "passed": true
+    },
+    {
+      "check": "anonymous reservations remain protected",
+      "passed": true
+    }
+  ]
+}
