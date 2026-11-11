@@ -65,6 +65,8 @@ A fresh Chromium profile exercised the actual deployed ES modules at 390×844, 3
 
 Final screenshots were captured from the real preview at mobile and desktop sizes. Reproducible browser automation is in `tests/ui_minimal.py` and `tests/cdp_browser.py`; the final machine-readable preview report is `tests/results/minimal-ux-preview.json`. The harness starts only an already-installed browser as a client of the remote deployment, with an isolated temporary profile; it never builds or serves the application locally.
 
+Production source read-back confirmed byte-for-byte matches for `app.css`, `app.js`, `demo.js` and `favicon.svg`, matching HTML/CSP nonce without `unsafe-inline`, healthy SQLite storage and unchanged anonymous API authorization (`user:null`, reservations 401). A fresh production browser passed entry, layout, Escape/focus and quick-add checks. The complete production rerun stopped on a Chromium/CDP timeout during page reload; it is **not** counted as a passing full production suite. The full 25-check result above is from the isolated preview running the same verified frontend bytes. No Cloudflare security controls were weakened to force a pass.
+
 ## Deliberate limitations
 
 No automatic password reset, outgoing email, email verification, drawing Secret Santa pairs, photo uploads or dark mode. Invitation links remain valid until the administrator rotates them; no time-based expiry is claimed. Prices are indicative and links are provided by family members, not fetched from shops.

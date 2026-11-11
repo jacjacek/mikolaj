@@ -10,6 +10,7 @@ proc = subprocess.Popen([
     os.environ['CHROMIUM_EXECUTABLE'],
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
     '--disable-extensions', '--no-first-run', '--disable-background-networking',
+    '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
     '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
     '--user-data-dir=' + str(profile), 'about:blank',
 ], stdout=log, stderr=log, env={**__import__('os').environ, 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/dbus/system_bus_socket'})
@@ -32,9 +33,11 @@ try:
     b.call('Network.enable')
     b.call('Network.setCacheDisabled', cacheDisabled=True)
     def wait(expr):
-        for _ in range(60):
+        for _ in range(300):
             if b.js(expr): return
             time.sleep(.1)
+        print('WAIT_STATE',b.js("({url:location.href,title:document.title,ready:document.readyState,text:document.body?.innerText.slice(0,1400)})"),flush=True)
+        b.screenshot(str(scratch/'mikolaj-wait-failure.png'))
         raise AssertionError('Timed out waiting: ' + expr)
     def act(expr):
         b.js(expr + ';true')
