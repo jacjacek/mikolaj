@@ -147,6 +147,9 @@ select.in:invalid { color: var(--faint); }
 .auth .foot { color: var(--faint); font-size: 14px; margin-top: 28px; }
 
 /* strona startowa */
+.demo-bar { margin: 0; padding: 10px 0 0; font-size: 13px; color: var(--faint); }
+.demo-bar button { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.demo-bar + .head { padding-top: 18px; }
 .head.pub { margin-bottom: 0; }
 .mark { font: 400 22px/1 var(--serif); letter-spacing: -.01em; padding: 6px 0; }
 .landing { padding: 56px 0 24px; }
