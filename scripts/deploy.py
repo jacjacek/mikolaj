@@ -110,7 +110,7 @@ def main():
     if not exists:
         metadata['migrations'] = {'new_tag': 'v1', 'steps': [{'new_sqlite_classes': ['FamilyStore']}]}
     parts = [('metadata', 'application/json', json.dumps(metadata).encode()), ('src/worker.js', 'application/javascript+module', (ROOT / 'src/worker.js').read_bytes())]
-    for file in ['index.html', 'app.css', 'app.js', 'favicon.svg']:
+    for file in ['index.html', 'app.css', 'app.js', 'demo.js', 'favicon.svg']:
         parts.append(('public/' + file, 'text/plain', (ROOT / 'public' / file).read_bytes()))
     payload, content_type = multipart(parts)
     deployed = api(prefix + f'/scripts/{name}', 'PUT', raw=payload, content_type=content_type)

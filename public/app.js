@@ -2,6 +2,8 @@
    Moduł ES bez zależności. Dane użytkowników trafiają do DOM wyłącznie
    przez textContent, .value lub setAttribute — nigdy przez innerHTML. */
 
+import { DEMO, DemoError, initDemo, demoRequest, demoPeople, demoActiveId, setDemoActive, resetDemo, onDemoStatus } from './demo.js';
+
 const d = document;
 
 // ---------- Stałe i formatowanie ----------
@@ -168,6 +170,21 @@ function statusMessage(status) {
 let inflight = 0;
 
 async function api(method, path, body) {
+  if (DEMO) {
+    // Podgląd UX: lokalne dane przykładowe, bez żadnego żądania do serwera.
+    inflight++;
+    try {
+      const data = await demoRequest(method, path, body);
+      if (!isObj(data)) throw new ApiError(UNEXPECTED);
+      return data;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (err instanceof DemoError) throw new ApiError(err.message || statusMessage(err.status), err.status);
+      throw new ApiError('Podgląd napotkał błąd. Odśwież stronę albo użyj „Od nowa”.');
+    } finally {
+      inflight--;
+    }
+  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 20000);
   const init = {
@@ -861,7 +878,8 @@ function renderShell() {
   avatar.className = `avatar tone-${toneFor(user.id)}`;
   const logoutBtn = d.getElementById('logout-btn');
   logoutBtn.setAttribute('aria-label', `Wyloguj się (${user.name})`);
-  d.querySelector('[data-nav="invite"]').hidden = !user.isAdmin;
+  logoutBtn.hidden = DEMO;
+  d.querySelector('[data-nav="invite"]').hidden = DEMO || !user.isAdmin;
   renderPendingNotice();
 }
 
@@ -877,7 +895,7 @@ function updateNav(routeName) {
 function renderPendingNotice() {
   const slot = d.getElementById('notice');
   const link = state.pendingLink;
-  if (!link || !state.me) { slot.replaceChildren(); return; }
+  if (DEMO || !link || !state.me) { slot.replaceChildren(); return; }
   const what = link.kind === 'invite' ? 'link zaproszenia do rodziny' : 'link do założenia nowej rodziny';
   const leave = h('button', { type: 'button', class: 'btn btn--ink btn--sm' }, icon('logout'), 'Wyloguj się i użyj linku');
   const stay = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Zignoruj link');
@@ -1568,6 +1586,15 @@ function reservedWishCard(w) {
 
 function viewInvite() {
   const { user, family } = state.me;
+  if (DEMO) {
+    return h('div', { class: 'page container' },
+      pageHead({
+        eyebrow: 'Zaproszenia',
+        title: 'Zaproszenia',
+        lede: 'W podglądzie UX zaproszenia są wyłączone. To przykładowa rodzina, więc nie ma komu wysłać linku — prawdziwe zaproszenia działają tylko w chronionej wersji aplikacji.',
+      }),
+      h('a', { class: 'btn btn--secondary', href: '#/' }, icon('arrow-left'), 'Wróć do rodziny'));
+  }
   if (!user.isAdmin) {
     return h('div', { class: 'page container' },
       pageHead({
@@ -1710,6 +1737,11 @@ function anyFieldFilled() {
 
 function onHashChange() {
   const link = readLinkFragment();
+  if (DEMO && link) {
+    // Prawdziwy link #setup= / #invite= otwiera chronioną aplikację; podgląd go nie obsługuje.
+    location.reload();
+    return;
+  }
   if (!state.me) {
     if (link) {
       applyLink(link);
@@ -1751,7 +1783,7 @@ async function onVisible() {
     if (!isInteracting()) renderRoute({ quiet: true, silent: true });
     return;
   }
-  if (anyFieldFilled() || state.tokens.invite || state.tokens.setup) return;
+  if (DEMO || anyFieldFilled() || state.tokens.invite || state.tokens.setup) return;
   try {
     const me = normSession(await api('GET', '/api/me'));
     if (me && !state.me && !anyFieldFilled()) onAuthenticated(me, false, { silent: true });
@@ -1768,6 +1800,108 @@ function bindGlobal() {
   $('.skip-link').addEventListener('click', e => { e.preventDefault(); focusHeading(); });
 }
 
+// ---------- Tryb podglądu UX ----------
+
+let demoSelect = null;
+
+function demoNoteText(status) {
+  return status.persistent
+    ? 'Zapis lokalny, bez synchronizacji.'
+    : 'Pamięć przeglądarki jest niedostępna: zmiany zostają tylko w tej karcie i znikną po jej zamknięciu. Rodzina ich nie zobaczy.';
+}
+
+// Pasek powstaje raz; odświeżanie widoków nie dotyka listy wyboru ani fokusu.
+function mountDemoBar(status) {
+  if (d.getElementById('demo-bar')) return false;
+  const note = h('span', { class: 'demo-bar__note', text: demoNoteText(status) });
+  demoSelect = h('select', { id: 'demo-as', class: 'demo-bar__select', name: 'demo-as' },
+    demoPeople().map(p => h('option', { value: p.id, text: p.name })));
+  demoSelect.value = demoActiveId();
+  demoSelect.addEventListener('change', () => switchDemoPerson(demoSelect.value));
+  const reset = h('button', { type: 'button', class: 'btn btn--secondary btn--sm demo-bar__reset' },
+    icon('refresh', 'icon icon--sm'), 'Od nowa', h('span', { class: 'sr-only', text: ' — przywróć dane przykładowe' }));
+  reset.addEventListener('click', confirmDemoReset);
+  onDemoStatus(next => {
+    const text = demoNoteText(next);
+    if (note.textContent !== text) note.textContent = text;
+    if (!next.persistent) toast('Nie udało się zapisać w pamięci przeglądarki. Zmiany zostają tylko w tej karcie.', { tone: 'error' });
+  });
+  const bar = h('section', { id: 'demo-bar', class: 'demo-bar', 'aria-label': 'Tryb podglądu UX' },
+    h('div', { class: 'demo-bar__inner' },
+      h('p', { class: 'demo-bar__info' }, icon('info', 'icon icon--sm'),
+        h('span', null, h('strong', { class: 'demo-bar__title', text: 'Podgląd UX · dane przykładowe' }), ' ', note)),
+      h('div', { class: 'demo-bar__controls' },
+        h('label', { class: 'demo-bar__label', for: 'demo-as', text: 'Podgląd jako' }),
+        demoSelect,
+        reset)));
+  d.getElementById('notice').before(bar);
+  return true;
+}
+
+async function showDemoPerson(message) {
+  state.editingLetter = false;
+  state.letterDirty = false;
+  state.inviteUrl = null;
+  state.justChanged = null;
+  letterNode = null;
+  const me = normSession(await api('GET', '/api/me'));
+  if (!me) throw bad();
+  state.me = me;
+  if (demoSelect) demoSelect.value = me.user.id;
+  if (location.hash !== '#/') history.pushState(null, '', '#/');
+  // Fokus zostaje na liście wyboru; zmianę ogłasza powiadomienie.
+  renderApp({ initial: true });
+  toast(message(me), { tone: 'success' });
+}
+
+function switchDemoPerson(id) {
+  const prev = demoActiveId();
+  if (id === prev) return;
+  const go = async () => {
+    if (!setDemoActive(id)) throw new ApiError('Nie ma takiej osoby w danych przykładowych.', 404);
+    await showDemoPerson(me => `Podgląd jako ${firstName(me.user.name)}.`);
+  };
+  if (state.letterDirty) {
+    demoSelect.value = prev;
+    const who = demoPeople().find(p => p.id === id)?.name || 'inną osobę';
+    confirmAction({
+      title: 'Porzucić zmiany w liście?',
+      message: `Masz niezapisane zmiany w liście do Mikołaja. Jeśli przełączysz podgląd na: ${who}, przepadną.`,
+      confirmLabel: 'Porzuć i przełącz',
+      action: go,
+    });
+    return;
+  }
+  go().catch(err => {
+    demoSelect.value = demoActiveId();
+    toast(messageOf(err), { tone: 'error' });
+  });
+}
+
+function confirmDemoReset() {
+  confirmAction({
+    title: 'Zacząć podgląd od nowa?',
+    message: `${state.letterDirty ? 'Masz niezapisane zmiany w liście — przepadną. ' : ''}Wszystkie zmiany w danych przykładowych w tej przeglądarce zostaną usunięte, a podgląd wróci do stanu początkowego. Prawdziwych danych rodziny to nie dotyczy.`,
+    confirmLabel: 'Przywróć dane przykładowe',
+    action: async () => {
+      resetDemo();
+      await showDemoPerson(() => 'Przywrócono dane przykładowe.');
+    },
+  });
+}
+
+async function bootDemo() {
+  const status = initDemo();
+  if (mountDemoBar(status) && status.recovered) {
+    toast('Zapisane dane podglądu były uszkodzone — przywrócono dane przykładowe.', { tone: 'info' });
+  }
+  const me = normSession(await api('GET', '/api/me'));
+  if (!me) throw bad();
+  state.me = me;
+  if (demoSelect) demoSelect.value = me.user.id;
+  renderApp();
+}
+
 // ---------- Start ----------
 
 function viewBootError(err) {
@@ -1782,6 +1916,17 @@ function viewBootError(err) {
 
 async function boot() {
   state.booting = true;
+  if (DEMO) {
+    try {
+      await bootDemo();
+    } catch (err) {
+      showShell(false);
+      mainEl().replaceChildren(viewBootError(err));
+    } finally {
+      state.booting = false;
+    }
+    return;
+  }
   const link = readLinkFragment();
   try {
     const me = normSession(await api('GET', '/api/me'));

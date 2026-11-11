@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import html from '../public/index.html';
 import css from '../public/app.css';
 import app from '../public/app.js';
+import demo from '../public/demo.js';
 import favicon from '../public/favicon.svg';
 
 const encoder = new TextEncoder();
@@ -272,6 +273,7 @@ export default {
       '/index.html': [html, 'text/html; charset=utf-8'],
       '/app.css': [css, 'text/css; charset=utf-8'],
       '/app.js': [app, 'application/javascript; charset=utf-8'],
+      '/demo.js': [demo, 'application/javascript; charset=utf-8'],
       '/favicon.svg': [favicon, 'image/svg+xml'],
       '/robots.txt': ['User-agent: *\nDisallow: /\n', 'text/plain; charset=utf-8'],
     };

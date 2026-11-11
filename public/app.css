@@ -438,6 +438,49 @@ textarea.input { min-height: 104px; resize: vertical; line-height: 1.5; }
 .banner__text { flex: 1 1 280px; font-size: .95rem; }
 .banner__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* ---------- Tryb podglądu UX ---------- */
+
+.demo-bar {
+  background: var(--card);
+  border-bottom: 1px dashed var(--line-strong);
+}
+.demo-bar__inner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding: 8px clamp(12px, 4.5vw, 40px);
+}
+.demo-bar__info {
+  display: flex; align-items: flex-start; gap: 8px;
+  flex: 1 1 280px; min-width: 0;
+  font-size: .875rem; line-height: 1.45;
+  color: var(--ink-soft);
+}
+.demo-bar__info > .icon { margin-top: 2px; color: var(--pine); }
+.demo-bar__title { display: block; font-weight: 650; color: var(--ink); }
+.demo-bar__controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  flex: 0 1 auto; min-width: 0;
+}
+.demo-bar__label { font-weight: 600; font-size: .875rem; }
+.demo-bar__select {
+  min-height: 44px; min-width: 0;
+  padding: 0 10px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--card-hi);
+  color: var(--ink);
+  font-weight: 600; font-size: .95rem;
+  cursor: pointer;
+}
+.demo-bar__select:hover { border-color: #b5a487; }
+.demo-bar__select:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+
+@media (max-width: 599px) {
+  .demo-bar__controls { flex: 1 1 100%; }
+  .demo-bar__select { flex: 1 1 96px; }
+}
+
 /* ---------- Strony ---------- */
 
 .main { display: block; min-height: 60vh; }

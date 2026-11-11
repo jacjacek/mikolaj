@@ -41,6 +41,14 @@ The browser used only generated preview-account session cookies for authenticate
 - Initial headless headers triggered Cloudflare edge verification. Application HTML now includes a fresh per-response CSP nonce compatible with Cloudflare JavaScript Detections, without `unsafe-inline`; two HTTP reads confirmed matching HTML/CSP nonces and different nonces per response. Production app loaded with normal Chrome headers. No zone-wide security controls were disabled.
 - The real production bootstrap secret was validated by a request deliberately rejected for an empty family name before account creation. Production remains ready for the user's first family.
 
+## Login-free UX working mode
+
+Default entry now opens an explicitly labelled, fictional family immediately, with no account/password. The sample state is stored under its own localStorage key and never calls the real API. Real authenticated mode remains available through `?live=1` and existing private setup/invitation links; backend authorization is unchanged.
+
+Real-browser checks on the deployed preview passed for: wish creation with Polish decimal pricing, persistence after navigation/reload, no recipient reservation metadata, zero backend API requests in demo, changing the active fictional family member, reserving and marking a gift bought, protecting an unsaved letter when changing person, confirmed reset to the seed, and no horizontal overflow at 320px. The live-mode escape hatch still displayed the login form; anonymous direct API requests still returned `user:null` / HTTP 401. The 390px view was also inspected.
+
+Demo changes are device/browser-local and do not synchronize with other family members. This is deliberate while iterating on UX, not a replacement for shared production storage. The reset action changes only the demo key.
+
 ## Deliberate limitations
 
 No automatic password reset, outgoing email, email verification, drawing Secret Santa pairs, photo uploads or dark mode. Invitation links remain valid until the administrator rotates them; no time-based expiry is claimed. Prices are indicative and links are provided by family members, not fetched from shops.

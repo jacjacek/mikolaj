@@ -2,11 +2,22 @@
 
 Prywatne, rodzinne listy do Świętego Mikołaja. Każda osoba pisze list i dodaje życzenia. Bliscy mogą rezerwować prezenty, oznaczać je jako kupione i anulować własne rezerwacje. Autor listy nigdy nie otrzymuje informacji o rezerwacjach — także w odpowiedzi API.
 
+## Tryb domyślny: podgląd UX bez logowania
+
+Na czas pracy nad UX adres główny (`/` i trasy `#/…`) otwiera od razu **przykładową, fikcyjną rodzinę** (Ania, Bartek, Marta, Tomek) — bez konta, hasła ani ekranu logowania. Pasek „Podgląd UX · dane przykładowe” pozwala przełączać osobę („Podgląd jako”) i przywrócić stan początkowy („Od nowa”, z potwierdzeniem).
+
+- Podgląd działa w całości w przeglądarce (`public/demo.js`): nie wywołuje prawdziwego API, nie tworzy ani nie usuwa sesji na serwerze i nie ma dostępu do danych prawdziwej rodziny.
+- Zmiany zapisują się tylko na tym urządzeniu, w tej przeglądarce, pod kluczem localStorage `mikolaj.ux-demo.v1`. Nie trafiają do rodziny. Gdy localStorage jest niedostępny, stan żyje tylko w bieżącej karcie (pasek o tym informuje); uszkodzony zapis jest zastępowany danymi przykładowymi bez ruszania innych kluczy.
+- Lokalnie obowiązują te same reguły co w backendzie: limity pól, brak rezerwacji własnych życzeń, jedna rezerwacja na prezent, zmiany tylko własnej listy i własnych rezerwacji, brak informacji o rezerwacjach na własnej liście, migawki z chwili rezerwacji.
+- Logowanie i zaproszenia są w podglądzie wyłączone (przycisk wylogowania i zakładka „Zaproś” są ukryte).
+
+**Prawdziwa, chroniona aplikacja (tryb live)** jest dostępna pod `/?live=1` oraz automatycznie po otwarciu linku `#setup=…` lub `#invite=…`. Autoryzacja po stronie serwera nie zmieniła się — podgląd jej nie omija, bo w ogóle nie korzysta z API. Wszystko poniżej opisuje tryb live.
+
 ## Architektura
 
 - Frontend: HTML, CSS i JavaScript bez zależności ani procesu budowania. Design przygotowany z Claude Code / Opus 5.5.
 - Backend: Cloudflare Worker, Web Crypto, SQLite-backed Durable Object.
-- Dane znajdują się w Cloudflare, nie w localStorage i nie na Mikrusie.
+- W trybie live dane znajdują się w Cloudflare, nie w localStorage i nie na Mikrusie. (localStorage służy wyłącznie danym przykładowym podglądu UX.)
 - Jedna rodzina na instalację. Utworzenie rodziny wymaga prywatnego, jednorazowo używanego linku startowego. Administrator zaprasza kolejnych członków osobnym linkiem, który może unieważnić.
 - E-mail jest identyfikatorem logowania. Aplikacja nie wysyła wiadomości, nie weryfikuje adresów i nie ma automatycznego resetu hasła.
 - To listy i rezerwacje, nie losowanie par Secret Santa.
@@ -43,4 +54,4 @@ python tests/live_api.py https://mikolaj-preview.SUBDOMAIN.workers.dev /sciezka/
 
 Testy tworzą jednorazową rodzinę i konta testowe w pustym podglądzie; skrypt odmawia działania na domenie produkcyjnej. Weryfikują logowanie, listy, autoryzację, CSRF, niebezpieczne URL, wyścig rezerwacji, anulowanie, status zakupów, rotację zaproszeń i brak ujawnienia rezerwacji autorowi listy. Testowych sesji nie wolno publikować.
 
-Widok mobilny i główne interakcje sprawdzaj w prawdziwej przeglądarce na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.
+Te testy dotyczą tylko API trybu live; podgląd UX nie ma automatycznych testów. Widok mobilny i główne interakcje (w podglądzie oraz pod `/?live=1`) sprawdzaj w prawdziwej przeglądarce na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.
