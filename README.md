@@ -41,7 +41,38 @@ Hasła są haszowane PBKDF2-SHA256 z losową solą i 100 000 iteracji. Sesje: lo
 
 Nie udostępniaj linku startowego ani zaproszenia publicznie. Nigdy nie dodawaj `.env`, plików bootstrap ani testowych sesji do repozytorium.
 
-## Wdrożenie bez budowania na Mikrusie
+## Repozytorium i automatyczne wdrożenia
+
+Cały kod aplikacji, backend, testy i skrypty wdrożeniowe znajdują się w prywatnym repozytorium **https://github.com/jacjacek/mikolaj**. Dane prawdziwej rodziny pozostają w Cloudflare, a sekrety i prywatne pliki bootstrap są poza Gitem.
+
+| Push do gałęzi | Automatyczny adres |
+| --- | --- |
+| `master` — główna gałąź wydaniowa | https://mikolaj.walasek.xyz/ |
+| `develop` — prace i podgląd | https://mikolaj-preview.jac3k.workers.dev/ |
+
+Z innego komputera lub narzędzia:
+
+```sh
+git clone git@github.com:jacjacek/mikolaj.git
+cd mikolaj
+git switch master
+# Zmień pliki, następnie:
+git add <zmienione-pliki>
+git commit -m "Opis zmiany"
+git push origin master
+```
+
+Push sam uruchamia `.github/workflows/deploy.yml` — nie potrzeba ręcznej komendy deploy ani dostępu do Mikrusa. Dla zmian roboczych użyj `develop`; opublikowanie ich na głównej domenie wymaga merge/pushu do `master`. Każda gałąź ma osobną kolejkę wdrożeń. Bezpośrednio przed uploadem sprawdzany jest aktualny HEAD gałęzi: ponowienie starego przebiegu jest pomijane i nie cofa nowszej wersji. Świadome cofnięcie zmian wykonuj przez `git revert` i nowy push.
+
+Wyjątek platformy GitHub: push wykonany przez wbudowany `GITHUB_TOKEN` innego workflow nie uruchamia automatycznie kolejnych workflowów. Takie automatyzacje powinny użyć odpowiedniego tokenu aplikacji/PAT albo jawnego `workflow_dispatch`. Zwykły push przez SSH, edycja w GitHubie i commity narzędzi korzystających z własnego uwierzytelnienia uruchamiają wdrożenie normalnie.
+
+GitHub Actions na hosted runnerze uruchamia testy zabezpieczeń deployu i kontrolę składni JS, przesyła surowe moduły do istniejącego Workera, a następnie sprawdza publiczną wersję, dokładne bajty frontendu, CSP i anonimową ochronę API. Nie wykonuje budowania aplikacji na Mikrusie. Zielony przebieg zawiera sprawdzony adres i SHA commita.
+
+Aktualna wersja jest pod **`/version.json`** na obu adresach (`revision` = pełny SHA, `branch` = gałąź). Odpowiedź ma `no-store`, a HTML i moduły wymagają ponownej walidacji cache. Po zakończonym workflow odśwież otwartą kartę — aplikacja celowo nie przeładowuje jej samoczynnie podczas pisania listu.
+
+Repozytorium ma jeden Actions secret `CLOUDFLARE_API_TOKEN` i dwie zmienne `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_ZONE_ID`. Poświadczenie GitHuba nie jest kopiowane do repozytorium ani workflow. CI używa `--ci`, dziedziczy `SETUP_TOKEN`, sprawdza niezmieniony namespace `FAMILY` i nie tworzy bootstrapu, migracji, DNS ani nowego przypięcia domeny. Baza, sesje i istniejące linki pozostają w tej samej instalacji. Nie zmieniaj identyfikatorów storage przy zwykłych zmianach frontendu.
+
+## Awaryjne wdrożenie źródłowe bez budowania
 
 Nie instaluj zależności, nie uruchamiaj npm/npx/node, bundlera ani lokalnego serwera. `scripts/deploy.py` przesyła nieprzetworzone moduły źródłowe do Cloudflare API; nie kompiluje aplikacji.
 

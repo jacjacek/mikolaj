@@ -9,6 +9,7 @@ Usage: python scripts/deploy.py --account ACCOUNT --zone ZONE [--preview]
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import urllib.error
@@ -81,8 +82,17 @@ def main():
     parser.add_argument('--account', required=True)
     parser.add_argument('--zone', required=True)
     parser.add_argument('--preview', action='store_true')
+    parser.add_argument('--ci', action='store_true', help='Update existing deployments only; never create bootstrap, namespaces or routes')
+    parser.add_argument('--revision', help='Exact 40-character Git commit SHA')
+    parser.add_argument('--branch', choices=['master', 'develop'])
     parser.add_argument('--rotate-setup-token', action='store_true', help='Explicit bootstrap recovery; invalidates the old setup link, not accounts or data')
     args = parser.parse_args()
+    if args.revision is not None and not re.fullmatch(r'[0-9a-f]{40}', args.revision):
+        parser.error('--revision must be an exact lowercase Git commit SHA')
+    if args.ci and (not args.revision or not args.branch or args.rotate_setup_token):
+        parser.error('--ci requires revision and branch, and forbids bootstrap rotation')
+    if args.branch and args.preview != (args.branch == 'develop'):
+        parser.error('develop requires --preview; master must target production')
     name = 'mikolaj-preview' if args.preview else 'mikolaj'
     hostname = 'mikolaj.walasek.xyz'
     prefix = f'/accounts/{args.account}/workers'
@@ -94,15 +104,33 @@ def main():
         raise RuntimeError('Wrong Cloudflare account or zone')
     scripts = api(prefix + '/scripts')
     exists = any(script['id'] == name for script in scripts)
+    if args.ci and not exists:
+        raise RuntimeError('CI refuses to create a missing Worker or new data namespace')
+    if args.ci and not args.preview:
+        matching = [domain for domain in api(prefix + '/domains') if domain['hostname'] == hostname]
+        if len(matching) != 1 or matching[0]['service'] != name or matching[0]['zone_id'] != args.zone:
+            raise RuntimeError('CI refuses to deploy without the expected existing domain attachment')
     setup = None
     bindings = [{'type': 'durable_object_namespace', 'name': 'FAMILY', 'class_name': 'FamilyStore'}]
+    bindings += [
+        {'type': 'plain_text', 'name': 'DEPLOY_REVISION', 'text': args.revision or 'manual'},
+        {'type': 'plain_text', 'name': 'DEPLOY_BRANCH', 'text': args.branch or ('develop' if args.preview else 'master')},
+    ]
+    previous_namespace = None
     if args.preview:
         bindings.append({'type': 'plain_text', 'name': 'STORE_NAME', 'text': 'family-ui-test-v1'})
     if exists and not args.rotate_setup_token:
         bindings.append({'type': 'inherit', 'name': 'SETUP_TOKEN'})
         settings = api(prefix + f'/scripts/{name}/settings')
-        if not any(binding['name'] == 'SETUP_TOKEN' for binding in settings.get('bindings', [])):
+        setup_binding = next((binding for binding in settings.get('bindings', []) if binding.get('name') == 'SETUP_TOKEN'), None)
+        if setup_binding is None:
             raise RuntimeError('Existing Worker has no SETUP_TOKEN; use explicit --rotate-setup-token recovery')
+        if setup_binding.get('type') != 'secret_text':
+            raise RuntimeError('Existing Worker has an unexpected SETUP_TOKEN binding type')
+        family = next((binding for binding in settings.get('bindings', []) if binding['name'] == 'FAMILY'), None)
+        if args.ci and (not family or family.get('type') != 'durable_object_namespace' or family.get('class_name') != 'FamilyStore' or not family.get('namespace_id')):
+            raise RuntimeError('CI refuses to change an unexpected FAMILY binding')
+        previous_namespace = family.get('namespace_id') if family else None
     else:
         setup, private = persist_bootstrap(name, rotate=args.rotate_setup_token)
         bindings.append({'type': 'secret_text', 'name': 'SETUP_TOKEN', 'text': setup})
@@ -117,14 +145,32 @@ def main():
     settings = api(prefix + f'/scripts/{name}/settings')
     if not any(binding['name'] == 'FAMILY' for binding in settings.get('bindings', [])):
         raise RuntimeError('Read-back failed: missing FAMILY binding')
+    current_family = next(binding for binding in settings['bindings'] if binding['name'] == 'FAMILY')
+    if current_family.get('type') != 'durable_object_namespace' or current_family.get('class_name') != 'FamilyStore' or not current_family.get('namespace_id'):
+        raise RuntimeError('Read-back failed: incorrect FAMILY binding')
+    if previous_namespace and current_family.get('namespace_id') != previous_namespace:
+        raise RuntimeError('Read-back failed: FAMILY namespace changed')
+    setup_binding = next((binding for binding in settings['bindings'] if binding.get('name') == 'SETUP_TOKEN'), None)
+    if setup_binding is None or setup_binding.get('type') != 'secret_text':
+        raise RuntimeError('Read-back failed: missing or incorrect SETUP_TOKEN binding')
+    if args.revision and not any(binding['name'] == 'DEPLOY_REVISION' and binding.get('type') == 'plain_text' and binding.get('text') == args.revision for binding in settings['bindings']):
+        raise RuntimeError('Read-back failed: incorrect deployment revision')
+    expected_branch = args.branch or ('develop' if args.preview else 'master')
+    if not any(binding['name'] == 'DEPLOY_BRANCH' and binding.get('type') == 'plain_text' and binding.get('text') == expected_branch for binding in settings['bindings']):
+        raise RuntimeError('Read-back failed: incorrect deployment branch')
     if setup:
         print('Private bootstrap persisted before upload:', private)
     if args.preview:
-        api(prefix + f'/scripts/{name}/subdomain', 'POST', {'enabled': True, 'previews_enabled': False})
+        if not args.ci:
+            api(prefix + f'/scripts/{name}/subdomain', 'POST', {'enabled': True, 'previews_enabled': False})
         subdomain = api(prefix + '/subdomain')['subdomain']
         print('PREVIEW_URL=https://' + name + '.' + subdomain + '.workers.dev')
     else:
         # Read exact resources before writing. Never overwrite unrelated records.
+        if args.ci:
+            print('DEPLOYED_URL=https://' + hostname)
+            print('Worker upload verified:', name, deployed.get('id'), 'revision:', args.revision)
+            return
         records = api(f'/zones/{args.zone}/dns_records?name={hostname}')
         domains = api(prefix + '/domains')
         matching = [domain for domain in domains if domain['hostname'] == hostname]

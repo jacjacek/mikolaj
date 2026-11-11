@@ -266,6 +266,11 @@ export class FamilyStore extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/version.json') {
+      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Niedozwolona metoda.' }, 405);
+      const response = json({ revision: env.DEPLOY_REVISION || 'manual', branch: env.DEPLOY_BRANCH || null });
+      return request.method === 'HEAD' ? new Response(null, { headers: response.headers }) : response;
+    }
     if (url.pathname.startsWith('/api/')) return env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request);
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Niedozwolona metoda.' }, 405);
     const assets = {
