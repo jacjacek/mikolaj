@@ -8,6 +8,8 @@ Verified against the real isolated Cloudflare Worker, not local mocks. No depend
 
 The new default, combined Moje view and an expanded gift were visually inspected in an actual mobile browser on preview before publishing. The visual check caught and removed literal null placeholders from optional lazy-row content and refined gift summary alignment and the compact reservations shortcut. Backend, demo storage schema/key and authorization were not changed.
 
+Production was published and read back: all four static assets matched the source byte-for-byte, HTML contained exactly two primary tabs with a valid CSP nonce, health was OK and anonymous reservations remained 401. **22 production UI checks passed**, including both tabs, nested disclosures, reserving/buying/releasing, combined-page privacy, unsaved letter protection and the missing-content/empty-state CTAs. The production rerun again hit the existing Chromium/CDP timeout during a full page reload; the remaining 11 checks are not claimed as production passes. Its explicitly incomplete report is `tests/results/two-tabs-production.json`; all 33 checks passed on preview. No real family data were changed by browser tests.
+
 The API results and the pre-two-tab UI results below are historical verification of their respective versions, not additional checks counted in the new 33-check suite.
 
 ## API
