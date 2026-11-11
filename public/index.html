@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Mikołaj — rodzinne listy do Mikołaja</title>
+  <title>Mikołaj — rodzinne listy życzeń</title>
   <meta name="description" content="Prywatne rodzinne listy życzeń. Bez dublowania prezentów i bez psucia niespodzianek.">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#f4ede0">
+  <meta name="theme-color" content="#f0f0eb">
   <meta name="color-scheme" content="light">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&amp;family=Instrument+Sans:ital,wght@0,400..700;1,400..700&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..600&amp;family=Newsreader:ital,opsz,wght@0,6..72,400..500;1,6..72,400..500&amp;display=swap">
   <link rel="stylesheet" href="/app.css">
   <script type="module" src="/app.js"></script>
 </head>
@@ -20,37 +20,32 @@
   <a class="skip-link" href="#main">Przejdź do treści</a>
 
   <header class="topbar" id="topbar" hidden>
-    <div class="topbar__inner">
+    <div class="topbar__inner container">
       <a class="brand" href="#/">
-        <svg class="brand__seal" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><use href="#brand-seal"/></svg>
-        <span class="brand__text">
-          <span class="brand__name">Mikołaj</span>
-          <span class="brand__family" id="brand-family"></span>
-        </span>
+        <span class="brand__name">Mikołaj</span>
+        <span class="brand__family" id="brand-family" hidden></span>
       </a>
       <nav class="nav" aria-label="Główna nawigacja">
         <a class="nav__link" href="#/" data-nav="home">
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-family"/></svg><span>Rodzina</span>
+          <span class="nav__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-family"/></svg></span><span>Rodzina</span>
         </a>
         <a class="nav__link" href="#/moja-lista" data-nav="mine">
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-letter"/></svg><span>Mój list</span>
+          <span class="nav__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-letter"/></svg></span><span>Mój list</span>
         </a>
         <a class="nav__link" href="#/rezerwacje" data-nav="reservations">
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-gift"/></svg><span>Rezerwacje</span>
+          <span class="nav__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-gift"/></svg></span><span>Prezenty</span>
         </a>
         <a class="nav__link" href="#/zaproszenie" data-nav="invite" hidden>
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-link"/></svg><span>Zaproś</span>
+          <span class="nav__icon"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-link"/></svg></span><span>Zaproś</span>
         </a>
       </nav>
-      <div class="session">
-        <span class="session__who">
-          <span class="avatar" id="session-avatar" aria-hidden="true"></span>
+      <div class="tools" id="tools">
+        <div class="session" id="session">
           <span class="session__name" id="session-name"></span>
-        </span>
-        <button class="btn btn--ghost btn--sm session__logout" id="logout-btn" type="button">
-          <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-logout"/></svg>
-          <span class="session__logout-label">Wyloguj się</span>
-        </button>
+          <button class="icon-btn" id="logout-btn" type="button" aria-label="Wyloguj się">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#i-logout"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -59,12 +54,8 @@
 
   <main id="main" class="main" tabindex="-1">
     <div class="loading" role="status">
-      <svg class="loader" viewBox="0 0 64 48" aria-hidden="true" focusable="false">
-        <rect x="6" y="12" width="52" height="32" rx="3" fill="#efe3cc" stroke="#1e1a15" stroke-width="2"/>
-        <path d="M6 13 L32 32 L58 13" fill="#e8dac0" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-        <circle cx="32" cy="31" r="5" fill="#b3302a"/>
-      </svg>
-      <span class="loading__label">Wczytywanie…</span>
+      <span class="spinner" aria-hidden="true"></span>
+      <span>Wczytywanie…</span>
     </div>
   </main>
 
@@ -79,11 +70,6 @@
 
   <!-- Ikony: jeden sprite, rysowane linią w kolorze tekstu -->
   <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
-    <symbol id="brand-seal" viewBox="0 0 32 32">
-      <path d="M16 1.4 L20.8 4.4 L26.3 5.7 L27.6 11.2 L30.6 16 L27.6 20.8 L26.3 26.3 L20.8 27.6 L16 30.6 L11.2 27.6 L5.7 26.3 L4.4 20.8 L1.4 16 L4.4 11.2 L5.7 5.7 L11.2 4.4 Z" fill="#b3302a" stroke="#b3302a" stroke-width="2" stroke-linejoin="round"/>
-      <circle cx="16" cy="16" r="9.2" fill="none" stroke="#fffaf3" stroke-opacity=".45" stroke-width="1.2"/>
-      <path d="M11.5 20.5 V12 L16 17 L20.5 12 V20.5" fill="none" stroke="#fffaf3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-    </symbol>
     <symbol id="i-family" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.2 19.5c.6-3.2 2.9-5.3 5.8-5.3s5.2 2.1 5.8 5.3"/><circle cx="16.8" cy="9.4" r="2.5"/><path d="M15.6 14.3c.4-.1.8-.1 1.2-.1 2.4 0 4.1 1.7 4.6 4.7"/></symbol>
     <symbol id="i-letter" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="1.6"/><path d="M3.6 6.5 12 13l8.4-6.5"/></symbol>
     <symbol id="i-gift" viewBox="0 0 24 24"><rect x="3.5" y="8" width="17" height="4" rx=".6"/><path d="M5 12v7.5h14V12M12 8v11.5"/><path d="M12 8c-1.3-2.9-4.8-4.1-5.4-1.8C6.1 8 9.4 8 12 8zm0 0c1.3-2.9 4.8-4.1 5.4-1.8C17.9 8 14.6 8 12 8z"/></symbol>
@@ -106,155 +92,7 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/></symbol>
     <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/></symbol>
     <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
-    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
   </svg>
-
-  <!-- Ilustracje: oryginalne, rysowane tuszem na papierze -->
-  <template id="art-hero">
-    <svg class="hero-env" viewBox="0 0 320 240" aria-hidden="true" focusable="false">
-      <defs>
-        <clipPath id="hero-env-clip"><rect x="0" y="0" width="320" height="217"/></clipPath>
-        <pattern id="hero-airmail" width="24" height="10" patternUnits="userSpaceOnUse" patternTransform="skewX(-35)">
-          <rect x="0" y="0" width="7" height="10" fill="#b3302a"/>
-          <rect x="12" y="0" width="7" height="10" fill="#2c5848"/>
-        </pattern>
-      </defs>
-      <ellipse cx="160" cy="229" rx="124" ry="7" fill="#1e1a15" opacity=".08"/>
-      <g class="hero-env__all">
-        <path class="hero-env__flap-back" d="M40 102 L160 28 L280 102 Z" fill="#e2d2b4" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-        <g clip-path="url(#hero-env-clip)">
-          <g class="hero-env__letter">
-            <rect x="64" y="42" width="192" height="170" rx="4" fill="#fffdf8" stroke="#1e1a15" stroke-width="2"/>
-            <text x="82" y="71" class="hero-env__script">Drogi Mikołaju,</text>
-            <path d="M82 85 H196 M82 97 H212" stroke="#cdbd9f" stroke-width="2" stroke-linecap="round"/>
-            <rect x="218" y="52" width="24" height="29" rx="2" fill="#b3302a" stroke="#1e1a15" stroke-width="1.5"/>
-            <path d="M230 58.5 l2.3 4.8 5.2.6-3.9 3.6 1.1 5.1-4.7-2.6-4.7 2.6 1.1-5.1-3.9-3.6 5.2-.6z" fill="#fffaf3"/>
-          </g>
-        </g>
-        <path d="M40 102 H280 V210 a6 6 0 0 1 -6 6 H46 a6 6 0 0 1 -6 -6 Z" fill="#efe3cc" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M42 214 L160 146 L278 214" fill="none" stroke="#cdbd9f" stroke-width="2" stroke-linejoin="round"/>
-        <rect x="48" y="203" width="224" height="5" fill="url(#hero-airmail)"/>
-        <g class="hero-env__flap-front">
-          <path d="M40 102 L160 172 L280 102 Z" fill="#e8dac0" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-          <circle cx="160" cy="167" r="15" fill="#b3302a" stroke="#8c211c" stroke-width="2"/>
-          <circle cx="160" cy="167" r="9.5" fill="none" stroke="#f0a99f" stroke-width="1.2" opacity=".8"/>
-          <path d="M154.5 172 V162 L160 168 L165.5 162 V172" fill="none" stroke="#fffaf3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </g>
-      </g>
-      <g fill="#c08a2e">
-        <path class="spark spark--1" d="M54 40 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z"/>
-        <path class="spark spark--2" d="M276 36 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2z"/>
-        <path class="spark spark--3" d="M296 128 l2.5 7 7 2.5 -7 2.5 -2.5 7 -2.5 -7 -7 -2.5 7 -2.5z"/>
-      </g>
-    </svg>
-  </template>
-
-  <template id="art-step-letter">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="80" cy="113" rx="54" ry="4" fill="#1e1a15" opacity=".07"/>
-      <rect x="34" y="12" width="80" height="96" rx="4" fill="#fffdf8" stroke="#1e1a15" stroke-width="2"/>
-      <path d="M46 30 H94 M46 42 H102 M46 54 H98 M46 66 H82" stroke="#cdbd9f" stroke-width="2" stroke-linecap="round"/>
-      <path d="M46 88 c5-7 9 3 14-2 s7 3 12-1 4 2 8 0" fill="none" stroke="#b3302a" stroke-width="2" stroke-linecap="round"/>
-      <g transform="rotate(32 118 64)">
-        <rect x="112" y="22" width="13" height="64" rx="3" fill="#2c5848" stroke="#1e1a15" stroke-width="2"/>
-        <rect x="112" y="22" width="13" height="11" rx="2" fill="#c08a2e" stroke="#1e1a15" stroke-width="2"/>
-        <path d="M112 86 L118.5 100 L125 86 Z" fill="#fffdf8" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      </g>
-    </svg>
-  </template>
-
-  <template id="art-step-gift">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="72" cy="113" rx="52" ry="4" fill="#1e1a15" opacity=".07"/>
-      <rect x="30" y="52" width="84" height="56" rx="3" fill="#f6e1d9" stroke="#1e1a15" stroke-width="2"/>
-      <rect x="24" y="38" width="96" height="18" rx="3" fill="#b3302a" stroke="#1e1a15" stroke-width="2"/>
-      <rect x="65" y="38" width="14" height="70" fill="#2c5848" stroke="#1e1a15" stroke-width="2"/>
-      <path d="M72 38 C60 17 39 22 47 34 C51 40 63 39 72 38 Z" fill="#2c5848" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M72 38 C84 17 105 22 97 34 C93 40 81 39 72 38 Z" fill="#2c5848" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M118 47 C124 52 125 62 124 70" fill="none" stroke="#1e1a15" stroke-width="1.5" stroke-linecap="round"/>
-      <g transform="rotate(10 136 86)">
-        <path d="M126 72 H152 V100 H126 L118 86 Z" fill="#fffdf8" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-        <circle cx="125" cy="86" r="2.4" fill="#1e1a15"/>
-        <path d="M132 86 l5 5 9-10" fill="none" stroke="#2c5848" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </g>
-    </svg>
-  </template>
-
-  <template id="art-step-seal">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="80" cy="113" rx="60" ry="4" fill="#1e1a15" opacity=".07"/>
-      <rect x="22" y="36" width="116" height="72" rx="4" fill="#efe3cc" stroke="#1e1a15" stroke-width="2"/>
-      <path d="M24 106 L80 70 L136 106" fill="none" stroke="#cdbd9f" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M22 37 L80 80 L138 37 Z" fill="#e8dac0" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <circle cx="80" cy="78" r="13" fill="#b3302a" stroke="#8c211c" stroke-width="2"/>
-      <path d="M75 82.5 V74 L80 79 L85 74 V82.5" fill="none" stroke="#fffaf3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-      <g fill="none" stroke="#1e1a15" stroke-width="2" stroke-linecap="round">
-        <path d="M104 17 q12 10 24 0"/>
-        <path d="M107.5 22.5 l-3 4 M116 25.5 v5 M124.5 22.5 l3 4"/>
-      </g>
-      <path d="M38 12 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2z" fill="#c08a2e"/>
-    </svg>
-  </template>
-
-  <template id="art-empty-letter">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="80" cy="113" rx="56" ry="4" fill="#1e1a15" opacity=".07"/>
-      <path d="M30 56 L80 22 L130 56 Z" fill="#e2d2b4" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <rect x="44" y="30" width="72" height="66" rx="3" fill="#fffdf8" stroke="#1e1a15" stroke-width="2"/>
-      <path d="M56 44 H100" stroke="#cdbd9f" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 6"/>
-      <path d="M30 56 H130 V102 a4 4 0 0 1 -4 4 H34 a4 4 0 0 1 -4 -4 Z" fill="#efe3cc" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M32 104 L80 76 L128 104" fill="none" stroke="#cdbd9f" stroke-width="2" stroke-linejoin="round"/>
-      <path d="M134 18 l2.5 7 7 2.5 -7 2.5 -2.5 7 -2.5 -7 -7 -2.5 7 -2.5z" fill="#c08a2e"/>
-      <path d="M22 30 l1.6 4.4 4.4 1.6 -4.4 1.6 -1.6 4.4 -1.6 -4.4 -4.4 -1.6 4.4 -1.6z" fill="#b3302a"/>
-    </svg>
-  </template>
-
-  <template id="art-empty-gift">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="80" cy="113" rx="54" ry="4" fill="#1e1a15" opacity=".07"/>
-      <rect x="40" y="54" width="80" height="54" rx="3" fill="#fffdf8" stroke="#1e1a15" stroke-width="2" stroke-dasharray="6 5"/>
-      <rect x="34" y="40" width="92" height="16" rx="3" fill="#fffdf8" stroke="#1e1a15" stroke-width="2" stroke-dasharray="6 5"/>
-      <path d="M80 40 V108" stroke="#b3302a" stroke-width="2" stroke-dasharray="6 5"/>
-      <path d="M80 40 C70 22 52 26 59 36 C62 41 72 40 80 40 M80 40 C90 22 108 26 101 36 C98 41 88 40 80 40" fill="none" stroke="#b3302a" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>
-      <path d="M128 16 l2.5 7 7 2.5 -7 2.5 -2.5 7 -2.5 -7 -7 -2.5 7 -2.5z" fill="#c08a2e"/>
-      <path d="M24 70 l1.6 4.4 4.4 1.6 -4.4 1.6 -1.6 4.4 -1.6 -4.4 -4.4 -1.6 4.4 -1.6z" fill="#2c5848"/>
-    </svg>
-  </template>
-
-  <template id="art-alone">
-    <svg class="art" viewBox="0 0 160 120" aria-hidden="true" focusable="false">
-      <ellipse cx="80" cy="110" rx="62" ry="4" fill="#1e1a15" opacity=".07"/>
-      <g transform="rotate(-5 38 60)">
-        <rect x="18" y="34" width="40" height="50" rx="2" fill="#fffdf8" stroke="#1e1a15" stroke-width="2"/>
-        <rect x="24" y="40" width="28" height="38" fill="#2c5848"/>
-        <circle cx="38" cy="53" r="6" fill="#fffdf8"/>
-        <path d="M28.5 74 q9.5 -14 19 0 Z" fill="#fffdf8"/>
-      </g>
-      <g transform="rotate(4 82 58)">
-        <rect x="62" y="33" width="40" height="50" rx="2" fill="none" stroke="#1e1a15" stroke-width="2" stroke-dasharray="4 4"/>
-        <path d="M82 50 v16 M74 58 h16" stroke="#b3302a" stroke-width="2.2" stroke-linecap="round"/>
-      </g>
-      <g transform="rotate(-3 126 62)">
-        <rect x="106" y="37" width="40" height="50" rx="2" fill="none" stroke="#1e1a15" stroke-width="2" stroke-dasharray="4 4"/>
-        <path d="M126 54 v16 M118 62 h16" stroke="#b3302a" stroke-width="2.2" stroke-linecap="round"/>
-      </g>
-      <path d="M150 18 l2 6 6 2 -6 2 -2 6 -2 -6 -6 -2 6 -2z" fill="#c08a2e"/>
-    </svg>
-  </template>
-
-  <template id="art-flap">
-    <svg class="envelope__flap" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-      <path d="M0 0 L50 40 L100 0 Z" fill="#e7d8bc"/>
-      <path d="M0 0 L50 40 L100 0" fill="none" stroke="#bfae90" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-    </svg>
-  </template>
-
-  <template id="art-loader">
-    <svg class="loader" viewBox="0 0 64 48" aria-hidden="true" focusable="false">
-      <rect x="6" y="12" width="52" height="32" rx="3" fill="#efe3cc" stroke="#1e1a15" stroke-width="2"/>
-      <path d="M6 13 L32 32 L58 13" fill="#e8dac0" stroke="#1e1a15" stroke-width="2" stroke-linejoin="round"/>
-      <circle cx="32" cy="31" r="5" fill="#b3302a"/>
-    </svg>
-  </template>
 </body>
 </html>

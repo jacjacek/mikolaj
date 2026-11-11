@@ -1,0 +1,127 @@
+[
+  {
+    "check": "mobile family view opens without login and fits viewport",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "family entries visible immediately",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "Escape closes dialog and restores add-button focus",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "quick-add updates own family entry",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "reload preserves price and safe literal user content",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "author sees no reservation or purchase controls",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "switching identity protects unsaved letter",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "cancelling preserves the letter draft",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "letter can be saved",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "mobile letter disclosure prioritizes gifts",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "available filter hides only gifts reserved by others",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "new reservation remains visible under filter",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "expanded letter survives reservation refresh",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "purchased toggle updates accessible state",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "gifts page preserves the purchased reservation",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "cancelling a bought gift asks for confirmation",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "cancelled confirmation preserves purchase",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "confirmed cancellation releases the gift",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "changed-gift warning and original purchase snapshot remain",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "demo never requests private API",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "no runtime or CSP errors after reload",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "demo reset is confirmed and explicitly excludes real data",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "reset restores known 15-wish sample",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "320px layout has no horizontal overflow",
+    "passed": true,
+    "value": true
+  },
+  {
+    "check": "desktop family and navigation fit viewport",
+    "passed": true,
+    "value": true
+  }
+]

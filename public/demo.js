@@ -253,7 +253,7 @@ function session(me) {
 
 function route(method, path, body) {
   const me = memberById(db.activeId);
-  if (!me) fail(500, 'Dane podglądu są niespójne. Użyj „Od nowa”.');
+  if (!me) fail(500, 'Dane podglądu są niespójne. W menu podglądu wybierz „Przywróć dane przykładowe”.');
 
   if (method === 'GET' && path === '/api/me') return session(me);
 

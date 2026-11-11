@@ -4,10 +4,19 @@ Prywatne, rodzinne listy do Świętego Mikołaja. Każda osoba pisze list i doda
 
 ## Tryb domyślny: podgląd UX bez logowania
 
-Na czas pracy nad UX adres główny (`/` i trasy `#/…`) otwiera od razu **przykładową, fikcyjną rodzinę** (Ania, Bartek, Marta, Tomek) — bez konta, hasła ani ekranu logowania. Pasek „Podgląd UX · dane przykładowe” pozwala przełączać osobę („Podgląd jako”) i przywrócić stan początkowy („Od nowa”, z potwierdzeniem).
+Na czas pracy nad UX adres główny (`/` i trasy `#/…`) otwiera od razu **przykładową, fikcyjną rodzinę** (Ania, Bartek, Marta, Tomek) — bez konta, hasła ani ekranu logowania. Narzędzia podglądu siedzą w nagłówku: pod nazwą „Mikołaj” widać „Podgląd · zapis lokalny”, natywna lista wyboru przełącza osobę, a menu „⋯” wyjaśnia tryb i pozwala przywrócić dane przykładowe (z potwierdzeniem).
+
+## Wygląd i UX
+
+Minimalistyczny, redakcyjny interfejs: neutralne tło `#f0f0eb`, czarny tusz, szeryfowe nagłówki (Newsreader) i Inter w interfejsie, płaskie białe karty bez cieni i dekoracji, jeden drobny cytrynowy akcent `#ddec61` (aktywna zakładka, „Twój list”, „Twoja rezerwacja”). Bez motywu świątecznego, kopert, pieczęci i ilustracji.
+
+- **Listy bliskich** (strona główna): krótki nagłówek, rodzina i liczba osób w jednej linii, przycisk „Dodaj życzenie” (otwiera okno dodawania od razu) i jedna siatka wszystkich osób — własny wpis oznaczony „Twój list”. Każdy wpis: imię, do dwóch linii listu, liczba życzeń.
+- **Mój list / list bliskiej osoby**: zwarty nagłówek i jedna cicha linia o prywatności. Własny list można edytować bezpośrednio; długi tekst ma „Czytaj całość”. Na telefonie list bliskiej osoby jest domyślnie zwinięty pod „List — Przeczytaj”, żeby życzenia były od razu widoczne. Rozwinięcie jest zapamiętywane podczas rezerwowania. Przełącznik „Wszystkie / Dostępne” ukrywa prezenty zajęte przez innych (własne rezerwacje zostają widoczne).
+- **Moje prezenty** (`#/rezerwacje`): podsumowanie w jednej linii, grupy według osoby, przełącznik „Kupione” i „Zrezygnuj”.
+- Nawigacja: na telefonie dolny pasek z ikonami i podpisami, na komputerze tekstowe zakładki w nagłówku. Ruch ograniczony do krótkich przejść; respektowane `prefers-reduced-motion`.
 
 - Podgląd działa w całości w przeglądarce (`public/demo.js`): nie wywołuje prawdziwego API, nie tworzy ani nie usuwa sesji na serwerze i nie ma dostępu do danych prawdziwej rodziny.
-- Zmiany zapisują się tylko na tym urządzeniu, w tej przeglądarce, pod kluczem localStorage `mikolaj.ux-demo.v1`. Nie trafiają do rodziny. Gdy localStorage jest niedostępny, stan żyje tylko w bieżącej karcie (pasek o tym informuje); uszkodzony zapis jest zastępowany danymi przykładowymi bez ruszania innych kluczy.
+- Zmiany zapisują się tylko na tym urządzeniu, w tej przeglądarce, pod kluczem localStorage `mikolaj.ux-demo.v1`. Nie trafiają do rodziny. Gdy localStorage jest niedostępny, stan żyje tylko w bieżącej karcie (nagłówek pokazuje wtedy „Podgląd · tylko ta karta”); uszkodzony zapis jest zastępowany danymi przykładowymi bez ruszania innych kluczy.
 - Lokalnie obowiązują te same reguły co w backendzie: limity pól, brak rezerwacji własnych życzeń, jedna rezerwacja na prezent, zmiany tylko własnej listy i własnych rezerwacji, brak informacji o rezerwacjach na własnej liście, migawki z chwili rezerwacji.
 - Logowanie i zaproszenia są w podglądzie wyłączone (przycisk wylogowania i zakładka „Zaproś” są ukryte).
 
@@ -54,4 +63,4 @@ python tests/live_api.py https://mikolaj-preview.SUBDOMAIN.workers.dev /sciezka/
 
 Testy tworzą jednorazową rodzinę i konta testowe w pustym podglądzie; skrypt odmawia działania na domenie produkcyjnej. Weryfikują logowanie, listy, autoryzację, CSRF, niebezpieczne URL, wyścig rezerwacji, anulowanie, status zakupów, rotację zaproszeń i brak ujawnienia rezerwacji autorowi listy. Testowych sesji nie wolno publikować.
 
-Te testy dotyczą tylko API trybu live; podgląd UX nie ma automatycznych testów. Widok mobilny i główne interakcje (w podglądzie oraz pod `/?live=1`) sprawdzaj w prawdziwej przeglądarce na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.
+Testy powyżej dotyczą API trybu live. Regresje podglądu UX sprawdza `tests/ui_minimal.py`: 25 kontroli na zdalnym wdrożeniu, na świeżym profilu Chromium. Test wymaga już dostępnych Chromium i Python `websockets`; nie instaluje zależności aplikacji i nie uruchamia lokalnego serwera. `CHROMIUM_EXECUTABLE` wskazuje istniejącą przeglądarkę, `MIKOLAJ_QA_OUTPUT` opcjonalny katalog raportu, a argument skryptu opcjonalny adres wdrożenia (domyślnie izolowany preview). Wyniki zatwierdzonej wersji są w `tests/results/minimal-ux-preview.json`. Widok mobilny i główne interakcje sprawdzaj na wdrożonym podglądzie przed publikacją na domenie głównej. Samo powodzenie uploadu nie oznacza sprawdzonej aplikacji.

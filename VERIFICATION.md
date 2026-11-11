@@ -49,6 +49,22 @@ Real-browser checks on the deployed preview passed for: wish creation with Polis
 
 Demo changes are device/browser-local and do not synchronize with other family members. This is deliberate while iterating on UX, not a replacement for shared production storage. The reset action changes only the demo key.
 
+## Minimal editorial redesign and mobile UX
+
+The redesigned HTML/CSS/JS were deployed to the isolated Cloudflare preview before production. The old holiday stylesheet was replaced, rather than overlaid with overrides. Application storage, auth, real API, invitation tokens and Durable Object identities were not changed. The demo adapter only received a wording correction for the renamed reset control.
+
+A fresh Chromium profile exercised the actual deployed ES modules at 390×844, 320×740 and 1440×1000. **25/25 final automated browser checks passed**, covering:
+
+- Direct login-free family view, compact header, early visibility of family entries and no horizontal overflow.
+- Quick-add from home; Polish comma pricing; literal HTML-like text; persistence after a real page reload.
+- Author privacy, editing and saving the letter, guarding unsaved text when changing demo person, cancelling without losing the draft.
+- Collapsed mobile member letter; availability filter with existing sample reservations; new reservations remaining visible in that filter; retaining an expanded letter during reservation refresh.
+- Purchased state, grouped gifts view, confirmation before releasing a bought gift, cancelling that confirmation, and actual confirmed release.
+- Changed-gift warning and original snapshot price; zero requests to the real API from demo; no collected JavaScript errors, unhandled rejections or CSP violations after reload.
+- Confirmed local-only reset restoring the known four-person, fifteen-wish sample; desktop navigation fitting the viewport.
+
+Final screenshots were captured from the real preview at mobile and desktop sizes. Reproducible browser automation is in `tests/ui_minimal.py` and `tests/cdp_browser.py`; the final machine-readable preview report is `tests/results/minimal-ux-preview.json`. The harness starts only an already-installed browser as a client of the remote deployment, with an isolated temporary profile; it never builds or serves the application locally.
+
 ## Deliberate limitations
 
 No automatic password reset, outgoing email, email verification, drawing Secret Santa pairs, photo uploads or dark mode. Invitation links remain valid until the administrator rotates them; no time-based expiry is claimed. Prices are indicative and links are provided by family members, not fetched from shops.

@@ -1,4 +1,4 @@
-/* Mikołaj — rodzinne listy do Mikołaja.
+/* Mikołaj — rodzinne listy życzeń.
    Moduł ES bez zależności. Dane użytkowników trafiają do DOM wyłącznie
    przez textContent, .value lub setAttribute — nigdy przez innerHTML. */
 
@@ -17,7 +17,6 @@ const FORMS = Object.freeze({
   wish: ['życzenie', 'życzenia', 'życzeń'],
   person: ['osoba', 'osoby', 'osób'],
   gift: ['prezent', 'prezenty', 'prezentów'],
-  day: ['dzień', 'dni', 'dni'],
   char: ['znak', 'znaki', 'znaków'],
 });
 
@@ -37,12 +36,7 @@ function plural(n, [one, few, many]) {
 const count = (n, forms) => `${n} ${plural(n, forms)}`;
 
 const firstName = name => name.trim().split(/\s+/)[0] || name;
-const initial = name => (Array.from(name.trim())[0] || '?').toLocaleUpperCase('pl-PL');
-function toneFor(id) {
-  let hash = 0;
-  for (const ch of String(id)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
-  return hash % 4;
-}
+const capFirst = t => (t ? t.charAt(0).toLocaleUpperCase('pl-PL') + t.slice(1) : t);
 function snippet(text, max = 120) {
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
@@ -58,20 +52,6 @@ function safeHttpUrl(value) {
 }
 function displayHost(href) {
   try { return new URL(href).hostname.replace(/^www\./, ''); } catch { return href; }
-}
-
-function christmas(now = new Date()) {
-  const y = now.getFullYear(), m = now.getMonth(), day = now.getDate();
-  if (m === 11 && day === 24) return { kind: 'eve' };
-  if (m === 11 && (day === 25 || day === 26)) return { kind: 'holiday' };
-  const today = new Date(y, m, day);
-  let eve = new Date(y, 11, 24);
-  if (today > eve) eve = new Date(y + 1, 11, 24);
-  return { kind: 'countdown', days: Math.round((eve - today) / 86400000) };
-}
-function greeting() {
-  const hour = new Date().getHours();
-  return hour >= 5 && hour < 18 ? 'Dzień dobry' : 'Dobry wieczór';
 }
 
 const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -110,18 +90,9 @@ function icon(name, cls = 'icon') {
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('focusable', 'false');
   const use = d.createElementNS(SVG_NS, 'use');
-  use.setAttribute('href', name === 'seal' ? '#brand-seal' : `#i-${name}`);
+  use.setAttribute('href', `#i-${name}`);
   svg.append(use);
   return svg;
-}
-function sealMark(cls) {
-  const svg = icon('seal', cls);
-  svg.setAttribute('viewBox', '0 0 32 32');
-  return svg;
-}
-function art(name) {
-  const tpl = d.getElementById(`art-${name}`);
-  return tpl ? tpl.content.firstElementChild.cloneNode(true) : h('span');
 }
 
 function setBusy(btn, on) {
@@ -180,7 +151,7 @@ async function api(method, path, body) {
     } catch (err) {
       if (err instanceof ApiError) throw err;
       if (err instanceof DemoError) throw new ApiError(err.message || statusMessage(err.status), err.status);
-      throw new ApiError('Podgląd napotkał błąd. Odśwież stronę albo użyj „Od nowa”.');
+      throw new ApiError('Podgląd napotkał błąd. Odśwież stronę albo przywróć dane przykładowe.');
     } finally {
       inflight--;
     }
@@ -322,12 +293,13 @@ const state = {
   inviteUrl: null,
   editingLetter: false,
   letterDirty: false,
-  justChanged: null,
+  memberFilter: 'all',
   lastVisibleRefresh: 0,
   booting: true,
   appHash: '',
 };
 let letterNode = null;
+const letterDisclosureState = new Map();
 
 // ---------- Fragment URL: #setup= / #invite= ----------
 
@@ -576,7 +548,7 @@ function parseUrlInput(raw) {
 }
 
 function parsePriceInput(raw) {
-  const t = raw.replace(/[\s ]/g, '').replace(/(zł|zl|pln)$/i, '').replace(',', '.');
+  const t = raw.replace(/[\s ]/g, '').replace(/(zł|zl|pln)$/i, '').replace(',', '.');
   if (!t) return { value: null };
   if (!/^\d{1,7}(\.\d{1,2})?$/.test(t)) return { error: 'Podaj kwotę w złotych, np. 149 albo 149,99.' };
   const n = Number(t);
@@ -589,42 +561,27 @@ const priceInputValue = n => (Number.isInteger(n) ? String(n) : n.toFixed(2).rep
 
 function renderWelcome() {
   showShell(false);
-  d.title = 'Mikołaj — rodzinne listy do Mikołaja';
+  d.title = 'Mikołaj — rodzinne listy życzeń';
   mainEl().replaceChildren(viewWelcome());
 }
 
 function viewWelcome() {
-  const card = h('div', { class: 'auth-card paper', id: 'auth-card' });
+  const card = h('div', { class: 'auth-card', id: 'auth-card' });
   renderAuthCard(card);
-  const fact = (name, text) => h('li', null, icon(name), h('span', { text }));
-  const step = (n, artName, title, text) => h('li', { class: 'step' },
-    art(artName),
-    h('div', null,
-      h('p', { class: 'step__num', 'aria-hidden': 'true', text: `0${n}` }),
-      h('h3', { class: 'step__title', text: title }),
-      h('p', { class: 'step__text', text })));
+  const fact = (name, text) => h('li', null, icon(name, 'icon icon--sm'), h('span', { text }));
 
-  return h('div', { class: 'welcome' },
-    h('section', { class: 'welcome__hero container' },
-      h('div', { class: 'welcome__intro' },
-        h('div', { class: 'welcome__art' }, art('hero')),
-        h('p', { class: 'eyebrow', text: 'Prywatne listy do Mikołaja' }),
-        h('h1', { class: 'display', tabindex: '-1' }, 'Napisz list. ', h('em', { text: 'Rodzina' }), ' zadba o resztę.'),
-        h('p', { class: 'lede', text: 'Każdy pisze swój list i dodaje życzenia. Bliscy po cichu rezerwują prezenty — bez dublowania zakupów i bez psucia niespodzianek.' }),
+  return h('div', { class: 'welcome container' },
+    h('div', { class: 'welcome__brand' }, h('span', { class: 'brand__name', text: 'Mikołaj' })),
+    h('div', { class: 'welcome__grid' },
+      h('section', { class: 'welcome__intro' },
+        h('h1', { class: 'display', tabindex: '-1', text: 'Rodzinne listy życzeń.' }),
+        h('p', { class: 'lede', text: 'Każdy pisze swój list i dodaje życzenia. Bliscy po cichu rezerwują prezenty — bez dublowania i bez psucia niespodzianek.' }),
         h('ul', { class: 'facts', role: 'list' },
-          fact('lock', 'Dostęp mają tylko osoby zaproszone do Twojej rodziny.'),
-          fact('gift', 'Jeden prezent — jedna rezerwacja. Nikt nie kupi tego samego.'),
-          fact('eye-off', 'Na własnej liście nie widzisz, co już ktoś szykuje.'))),
+          fact('lock', 'Dostęp mają tylko osoby zaproszone do rodziny.'),
+          fact('gift', 'Jeden prezent — jedna rezerwacja.'),
+          fact('eye-off', 'Na własnej liście nie widzisz rezerwacji.'))),
       h('div', { class: 'welcome__panel' }, card)),
-    h('section', { class: 'how container', 'aria-labelledby': 'how-title' },
-      h('h2', { class: 'section-title how__title', id: 'how-title', text: 'Jak to działa' }),
-      h('ol', { class: 'how__steps', role: 'list' },
-        step(1, 'step-letter', 'Napisz list', 'Kilka słów o tym, co lubisz, i lista życzeń z notatką, linkiem i orientacyjną ceną.'),
-        step(2, 'step-gift', 'Rodzina rezerwuje', 'Bliscy widzą Twoją listę i rezerwują pojedyncze prezenty. Raz zarezerwowanego nikt już nie weźmie.'),
-        step(3, 'step-seal', 'Niespodzianka zostaje', 'Ty nie widzisz rezerwacji, liczników ani tego, kto co kupił. Zobaczysz wszystko pod choinką.'))),
-    h('footer', { class: 'site-foot container' },
-      h('span', { text: 'Mikołaj · prywatne rodzinne listy życzeń' }),
-      h('span', { text: 'E-mail służy tylko do logowania. Nie wysyłamy żadnych wiadomości.' })));
+    h('footer', { class: 'site-foot', text: 'E-mail służy tylko do logowania. Nie wysyłamy żadnych wiadomości.' }));
 }
 
 function rerenderAuthCard() {
@@ -657,12 +614,12 @@ function renderAuthCard(card) {
         h('div', { class: 'callout callout--error' }, icon('alert'),
           h('div', { class: 'callout__body' },
             h('p', { class: 'callout__title', text: 'To zaproszenie już nie działa.' }),
-            h('p', { text: 'Link mógł zostać zmieniony. Poproś osobę, która prowadzi Waszą rodzinę w Mikołaju, o aktualny link. Jeśli masz już konto — po prostu się zaloguj.' }))),
+            h('p', { text: 'Link mógł zostać zmieniony. Poproś osobę, która prowadzi Waszą rodzinę, o aktualny link. Jeśli masz już konto — zaloguj się.' }))),
         authHead('Zaloguj się', null),
         loginForm());
     } else {
       if (inv.status === 'error') {
-        const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, icon('refresh'), 'Sprawdź ponownie');
+        const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm' }, icon('refresh', 'icon icon--sm'), 'Sprawdź ponownie');
         retry.addEventListener('click', () => checkInvitation());
         parts.push(h('div', { class: 'callout callout--error' }, icon('alert'),
           h('div', { class: 'callout__body' }, h('p', { text: `Nie udało się sprawdzić zaproszenia. ${inv.message || ''}`.trim() }), retry)));
@@ -678,21 +635,21 @@ function renderAuthCard(card) {
             h('p', { class: 'auth-card__text', text: 'Załóż konto, napisz swój list i zobacz listy bliskich.' })),
           joinForm());
       } else {
-        parts.push(authHead('Zaloguj się', 'Masz już konto w tej rodzinie? Zaloguj się tym samym adresem e-mail.'), loginForm());
+        parts.push(authHead('Zaloguj się', 'Masz już konto w tej rodzinie? Użyj tego samego adresu e-mail.'), loginForm());
       }
     }
   } else if (tokens.setup) {
     parts.push(segmented([{ value: 'create', label: 'Załóż rodzinę' }, { value: 'login', label: 'Mam już konto' }], auth.mode, onMode));
     if (auth.mode === 'create') {
-      parts.push(authHead('Załóż rodzinę', 'Ten prywatny link pozwala utworzyć rodzinę. Będziesz nią zarządzać i dostaniesz link zaproszenia dla bliskich.'), createForm());
+      parts.push(authHead('Załóż rodzinę', 'Ten prywatny link pozwala utworzyć rodzinę. Dostaniesz link zaproszenia dla bliskich.'), createForm());
     } else {
       parts.push(authHead('Zaloguj się', null), loginForm());
     }
   } else {
-    parts.push(authHead('Zaloguj się', 'Witaj z powrotem. Twoje listy czekają.'), loginForm());
+    parts.push(authHead('Zaloguj się', null), loginForm());
     parts.push(h('div', { class: 'auth-card__foot' },
-      h('strong', { text: 'Nie masz jeszcze konta?' }),
-      h('p', { text: 'Konto zakłada się wyłącznie z prywatnego linku zaproszenia. Poproś o niego osobę, która prowadzi Waszą rodzinę w Mikołaju — wystarczy go otworzyć na tym urządzeniu.' })));
+      h('strong', { text: 'Nie masz konta?' }),
+      h('p', { text: 'Konto zakłada się wyłącznie z prywatnego linku zaproszenia. Poproś o niego osobę, która prowadzi Waszą rodzinę.' })));
   }
   card.replaceChildren(...parts);
 }
@@ -771,7 +728,7 @@ function createForm() {
 function joinForm() {
   return authForm({
     fields: {
-      name: field({ label: 'Twoje imię', name: 'name', required: true, maxlength: LIMITS.name, autocomplete: 'given-name', placeholder: 'np. Ania', hint: 'Tak podpiszesz swój list.' }),
+      name: field({ label: 'Twoje imię', name: 'name', required: true, maxlength: LIMITS.name, autocomplete: 'given-name', placeholder: 'np. Ania', hint: 'Tak zobaczą Cię bliscy.' }),
       email: emailField(),
       password: passwordField({ label: 'Hasło', autocomplete: 'new-password', isNew: true }),
     },
@@ -818,7 +775,7 @@ function onAuthenticated(me, registered, { silent = false } = {}) {
   renderApp({ initial: silent });
   if (silent) return;
   toast(registered
-    ? `Witaj w rodzinie „${me.family.name}”! Zacznij od swojego listu.`
+    ? `Witaj w rodzinie „${me.family.name}”. Zacznij od swojego listu.`
     : `Witaj ponownie, ${firstName(me.user.name)}.`, { tone: 'success' });
 }
 
@@ -859,7 +816,7 @@ async function logout(btn, link = null) {
   signedOut(link ? null : 'Wylogowano. Do zobaczenia!', link);
 }
 
-// ---------- Powłoka zalogowanej aplikacji ----------
+// ---------- Powłoka aplikacji ----------
 
 function showShell(on) {
   d.getElementById('topbar').hidden = !on;
@@ -869,16 +826,13 @@ function showShell(on) {
 
 function renderShell() {
   if (!state.me) return;
-  const { user, family } = state.me;
+  const { user } = state.me;
   showShell(true);
-  d.getElementById('brand-family').textContent = family.name;
+  // W podglądzie imię aktywnej osoby pokazuje wyłącznie lista wyboru.
+  d.getElementById('session').hidden = DEMO;
   d.getElementById('session-name').textContent = user.name;
-  const avatar = d.getElementById('session-avatar');
-  avatar.textContent = initial(user.name);
-  avatar.className = `avatar tone-${toneFor(user.id)}`;
-  const logoutBtn = d.getElementById('logout-btn');
-  logoutBtn.setAttribute('aria-label', `Wyloguj się (${user.name})`);
-  logoutBtn.hidden = DEMO;
+  d.getElementById('logout-btn').setAttribute('aria-label', `Wyloguj się (${user.name})`);
+  if (!DEMO) d.getElementById('brand-family').hidden = true;
   d.querySelector('[data-nav="invite"]').hidden = DEMO || !user.isAdmin;
   renderPendingNotice();
 }
@@ -897,14 +851,13 @@ function renderPendingNotice() {
   const link = state.pendingLink;
   if (DEMO || !link || !state.me) { slot.replaceChildren(); return; }
   const what = link.kind === 'invite' ? 'link zaproszenia do rodziny' : 'link do założenia nowej rodziny';
-  const leave = h('button', { type: 'button', class: 'btn btn--ink btn--sm' }, icon('logout'), 'Wyloguj się i użyj linku');
-  const stay = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Zignoruj link');
+  const leave = h('button', { type: 'button', class: 'btn btn--primary btn--sm' }, 'Wyloguj się i użyj linku');
+  const stay = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Zignoruj');
   leave.addEventListener('click', () => logout(leave, link));
   stay.addEventListener('click', () => { state.pendingLink = null; renderPendingNotice(); focusHeading(); });
   slot.replaceChildren(h('div', { class: 'container' },
     h('div', { class: 'banner', role: 'region', 'aria-label': 'Otwarty link' },
-      icon('link'),
-      h('p', { class: 'banner__text', text: `Otwarto ${what}, ale masz już otwartą sesję jako ${state.me.user.name} (${state.me.family.name}). Aby go użyć, najpierw się wyloguj.` }),
+      h('p', { class: 'banner__text', text: `Otwarto ${what}, ale masz otwartą sesję jako ${state.me.user.name} (${state.me.family.name}). Aby go użyć, najpierw się wyloguj.` }),
       h('div', { class: 'banner__actions' }, leave, stay))));
 }
 
@@ -933,7 +886,7 @@ function parseRoute() {
 }
 
 const ROUTES = {
-  home: { title: () => 'Rodzina', render: () => viewHome() },
+  home: { title: () => 'Listy bliskich', render: () => viewHome() },
   mine: {
     title: () => 'Mój list',
     load: async () => normMemberWishes(await api('GET', `/api/members/${encodeURIComponent(state.me.user.id)}/wishes`), state.me.user.id),
@@ -945,11 +898,11 @@ const ROUTES = {
     render: data => viewMember(data),
   },
   reservations: {
-    title: () => 'Moje rezerwacje',
+    title: () => 'Moje prezenty',
     load: async () => normReservations(await api('GET', '/api/reservations')),
     render: data => viewReservations(data),
   },
-  invite: { title: () => 'Zaproś rodzinę', render: () => viewInvite() },
+  invite: { title: () => 'Zaproś bliskich', render: () => viewInvite() },
   notfound: { title: () => 'Nie znaleziono', render: () => viewNotFound() },
 };
 
@@ -978,6 +931,7 @@ async function renderRoute({ quiet = false, silent = false, initial = false } = 
   if (!quiet) {
     state.editingLetter = false;
     state.letterDirty = false;
+    state.memberFilter = 'all';
     letterNode = null;
     closeAllDialogs();
   }
@@ -1014,7 +968,6 @@ async function renderRoute({ quiet = false, silent = false, initial = false } = 
   }
 
   m.replaceChildren(node);
-  state.justChanged = null;
   if (quiet) {
     window.scrollTo(0, scrollY);
     if (focusKey) {
@@ -1029,12 +982,11 @@ async function renderRoute({ quiet = false, silent = false, initial = false } = 
 
 const refreshView = () => renderRoute({ quiet: true });
 
-async function act(btn, call, { success, changed } = {}) {
+async function act(btn, call, { success } = {}) {
   if (!btn || btn.disabled) return;
   setBusy(btn, true);
   try {
     await call();
-    state.justChanged = changed ?? null;
     await refreshView();
     if (success) toast(success, { tone: 'success' });
   } catch (err) {
@@ -1049,178 +1001,140 @@ async function act(btn, call, { success, changed } = {}) {
 // ---------- Widoki pomocnicze ----------
 
 function viewLoading(label = 'Wczytywanie…') {
-  return h('div', { class: 'loading', role: 'status' }, art('loader'), h('span', { class: 'loading__label', text: label }));
+  return h('div', { class: 'loading', role: 'status' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { text: label }));
+}
+
+function stateView(title, text, actions) {
+  return h('section', { class: 'state container' },
+    h('h1', { class: 'page-title', tabindex: '-1', text: title }),
+    h('p', { class: 'state__text', text }),
+    h('div', { class: 'state__actions' }, actions));
 }
 
 function viewError(err, retry, withBack = false) {
-  const retryBtn = h('button', { type: 'button', class: 'btn btn--ink' }, icon('refresh'), 'Spróbuj ponownie');
+  const retryBtn = h('button', { type: 'button', class: 'btn btn--primary' }, icon('refresh', 'icon icon--sm'), 'Spróbuj ponownie');
   retryBtn.addEventListener('click', retry);
-  return h('section', { class: 'state container' },
-    art('empty-letter'),
-    h('h1', { class: 'state__title', tabindex: '-1', text: 'Nie udało się wczytać' }),
-    h('p', { class: 'state__text', text: messageOf(err) }),
-    h('div', { class: 'state__actions' },
-      retryBtn,
-      withBack ? h('a', { class: 'btn btn--secondary', href: '#/' }, icon('arrow-left'), 'Wróć do rodziny') : null));
+  return stateView('Nie udało się wczytać', messageOf(err),
+    [retryBtn, withBack ? h('a', { class: 'btn btn--secondary', href: '#/' }, 'Listy bliskich') : null]);
 }
 
 function viewNotFound() {
-  return h('section', { class: 'state container' },
-    art('empty-letter'),
-    h('h1', { class: 'state__title', tabindex: '-1', text: 'Tej strony tu nie ma' }),
-    h('p', { class: 'state__text', text: 'Może list zmienił adres? Wróć na stronę rodziny.' }),
-    h('div', { class: 'state__actions' }, h('a', { class: 'btn btn--ink', href: '#/' }, icon('family'), 'Strona rodziny')));
+  return stateView('Tej strony tu nie ma', 'Może adres się zmienił.', [h('a', { class: 'btn btn--primary', href: '#/' }, 'Listy bliskich')]);
 }
 
-function pageHead({ eyebrow, title, lede }) {
+function quiet(iconName, text) {
+  return [icon(iconName, 'icon icon--sm'), h('span', { text })];
+}
+
+function pageHead({ title, meta, note, action, back }) {
   return h('header', { class: 'page-head' },
-    eyebrow ? h('p', { class: 'eyebrow', text: eyebrow }) : null,
-    h('h1', { class: 'display', tabindex: '-1', text: title }),
-    lede ? h('p', { class: 'lede', text: lede }) : null);
+    back || null,
+    h('div', { class: 'page-head__row' },
+      h('div', { class: 'page-head__text' },
+        h('h1', { class: 'page-title', tabindex: '-1', text: title }),
+        meta ? h('p', { class: 'page-meta' }, meta) : null),
+      action || null),
+    note ? h('p', { class: 'page-note' }, note) : null);
 }
 
-function countChip(n) {
-  if (!n) return null;
-  return h('span', { class: 'count-chip' }, String(n), h('span', { class: 'sr-only', text: ` ${plural(n, FORMS.wish)}` }));
+function addWishButton(fkey) {
+  const btn = h('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-fkey': fkey }, icon('plus', 'icon icon--sm'), 'Dodaj życzenie');
+  btn.addEventListener('click', () => openWishDialog(null));
+  return btn;
 }
 
-function emptyState({ artName, title, text, action, level = 'h3' }) {
-  return h('div', { class: 'empty' },
-    art(artName),
-    h(level, { class: 'empty__title', text: title }),
-    h('p', { class: 'empty__text', text }),
+function sectionHead(id, title, n, action) {
+  return h('div', { class: 'section-head' },
+    h('h2', { class: 'section-title', id },
+      title,
+      n ? h('span', { class: 'section-count', text: String(n) }) : null),
     action || null);
 }
 
-// ---------- Strona rodziny ----------
-
-function countdown() {
-  const c = christmas();
-  if (c.kind === 'eve') {
-    return h('div', { class: 'countdown countdown--fest' },
-      h('span', { class: 'countdown__band', text: '24 grudnia' }),
-      h('span', { class: 'countdown__num', text: 'Dziś Wigilia!' }));
-  }
-  if (c.kind === 'holiday') {
-    return h('div', { class: 'countdown countdown--fest' },
-      h('span', { class: 'countdown__band', text: 'Grudzień' }),
-      h('span', { class: 'countdown__num', text: 'Wesołych Świąt!' }));
-  }
-  return h('div', { class: 'countdown' },
-    h('span', { class: 'countdown__band', text: 'Do Wigilii' }),
-    h('span', { class: 'countdown__num', text: String(c.days) }),
-    h('span', { class: 'countdown__unit', text: plural(c.days, FORMS.day) }));
-}
+// ---------- Listy bliskich ----------
 
 function viewHome() {
   const { user, family, members } = state.me;
-  const self = members.find(m => m.id === user.id) || { id: user.id, name: user.name, letter: '', wishCount: 0 };
-  const others = members.filter(m => m.id !== user.id).sort((a, b) => a.name.localeCompare(b.name, 'pl'));
-  const totalWishes = members.reduce((n, m) => n + m.wishCount, 0);
+  const all = members.some(m => m.id === user.id) ? members : [...members, { id: user.id, name: user.name, letter: '', wishCount: 0 }];
+  const people = [...all].sort((a, b) => a.name.localeCompare(b.name, 'pl'));
+  const alone = people.length < 2;
 
-  const hero = h('section', { class: 'home-hero' },
-    h('div', { class: 'home-hero__text' },
-      h('p', { class: 'eyebrow', text: family.name }),
-      h('h1', { class: 'display', tabindex: '-1' }, `${greeting()}, `, h('em', { text: firstName(user.name) }), '.'),
-      h('p', { class: 'lede', text: others.length
-        ? 'Wybierz kopertę, żeby przeczytać list i po cichu zarezerwować prezent.'
-        : 'Tu pojawią się listy Twoich bliskich, gdy tylko dołączą.' }),
-      h('ul', { class: 'chips', role: 'list' },
-        h('li', { class: 'chip' }, icon('family', 'icon icon--sm'), `${count(members.length || 1, FORMS.person)} w rodzinie`),
-        h('li', { class: 'chip' }, icon('gift', 'icon icon--sm'), `${count(totalWishes, FORMS.wish)} na listach`))),
-    countdown());
-
-  const hasLetter = self.letter.trim().length > 0;
-  const selfSection = h('section', { class: 'home-section', 'aria-labelledby': 'self-h' },
-    h('h2', { class: 'section-title', id: 'self-h', text: 'Twój list' }),
-    h('a', { class: 'self-card', href: '#/moja-lista' },
-      h('span', { class: 'self-card__art' }, art('step-letter')),
-      h('span', { class: 'self-card__body' },
-        h('span', { class: 'self-card__title', text: hasLetter ? 'Drogi Mikołaju,' : 'Napisz swój list' }),
-        h('span', { class: 'self-card__text', text: hasLetter ? snippet(self.letter, 150) : 'Kilka słów o tym, co lubisz, pomoże bliskim trafić z prezentem.' }),
-        h('span', { class: 'self-card__meta', text: self.wishCount ? `Na liście: ${count(self.wishCount, FORMS.wish)}` : 'Lista życzeń jest jeszcze pusta' })),
-      h('span', { class: 'self-card__cta' }, hasLetter || self.wishCount ? 'Otwórz mój list' : 'Zacznij pisać', icon('arrow-right'))));
-
-  const familySection = h('section', { class: 'home-section', 'aria-labelledby': 'family-h' },
-    h('h2', { class: 'section-title', id: 'family-h', text: 'Listy rodziny' }));
-
-  if (!others.length) {
-    familySection.append(emptyState({
-      artName: 'alone',
-      title: 'Na razie jesteś tu tylko Ty',
-      text: user.isAdmin
-        ? 'Wyślij bliskim prywatny link zaproszenia. Gdy dołączą, ich koperty pojawią się właśnie tutaj.'
-        : 'Gdy dołączą kolejne osoby, ich listy pojawią się właśnie tutaj. Link zaproszenia ma osoba, która założyła rodzinę.',
-      action: user.isAdmin ? h('a', { class: 'btn btn--primary', href: '#/zaproszenie' }, icon('link'), 'Zaproś bliskich') : null,
-    }));
-  } else {
-    const grid = h('ul', { class: 'envelopes', role: 'list' }, others.map(m => h('li', null, envelopeCard(m))));
-    if (user.isAdmin) {
-      grid.append(h('li', null, h('a', { class: 'envelope envelope--invite', href: '#/zaproszenie' },
-        h('span', { class: 'plus', 'aria-hidden': 'true' }, icon('plus', 'icon icon--lg')),
-        h('strong', { text: 'Zaproś kolejną osobę' }),
-        h('span', { text: 'Prywatny link dla bliskich' }))));
-    }
-    familySection.append(grid);
+  let foot = null;
+  if (alone) {
+    foot = h('div', { class: 'empty' },
+      h('p', { class: 'empty__text', text: user.isAdmin
+        ? 'Na razie jesteś tu tylko Ty. Wyślij bliskim prywatny link zaproszenia.'
+        : 'Na razie jesteś tu tylko Ty. Listy bliskich pojawią się, gdy dołączą.' }),
+      user.isAdmin ? h('a', { class: 'btn btn--secondary btn--sm', href: '#/zaproszenie' }, icon('link', 'icon icon--sm'), 'Zaproś bliskich') : null);
+  } else if (user.isAdmin) {
+    foot = h('p', { class: 'page-foot' }, h('a', { class: 'text-link', href: '#/zaproszenie' }, icon('plus', 'icon icon--sm'), 'Zaproś kolejną osobę'));
   }
 
-  return h('div', { class: 'page container' }, hero, selfSection, familySection);
+  return h('div', { class: 'page container' },
+    pageHead({
+      title: 'Listy bliskich',
+      meta: `${family.name} · ${count(people.length, FORMS.person)}`,
+      action: addWishButton('home-add'),
+    }),
+    h('ul', { class: 'people', role: 'list' }, people.map(m => h('li', null, personCard(m, m.id === user.id)))),
+    foot);
 }
 
-function envelopeCard(m) {
-  const text = snippet(m.letter, 120);
-  return h('a', { class: `envelope tone-${toneFor(m.id)}`, href: `#/osoba/${encodeURIComponent(m.id)}` },
-    art('flap'),
-    sealMark('envelope__seal'),
-    h('span', { class: 'envelope__body' },
-      h('span', { class: 'envelope__to', text: 'List od' }),
-      h('span', { class: 'envelope__name', text: m.name }),
-      h('span', { class: `envelope__snippet${text ? '' : ' is-empty'}`, text: text ? `„${text}”` : 'List jeszcze bez treści.' })),
-    h('span', { class: 'stamp', 'aria-hidden': 'true' }, h('span', { class: 'stamp__face', text: initial(m.name) })),
-    h('span', { class: 'envelope__foot' },
-      h('span', { class: 'envelope__count' }, icon('gift', 'icon icon--sm'), m.wishCount ? count(m.wishCount, FORMS.wish) : 'Brak życzeń'),
-      h('span', { class: 'envelope__open', 'aria-hidden': 'true' }, 'Otwórz', icon('arrow-right', 'icon icon--sm'))));
+function personCard(m, self) {
+  const text = snippet(m.letter, 160);
+  return h('a', {
+    class: `person${self ? ' person--self' : ''}`,
+    href: self ? '#/moja-lista' : `#/osoba/${encodeURIComponent(m.id)}`,
+    'data-fkey': `person-${m.id}`,
+  },
+  h('span', { class: 'person__head' },
+    h('span', { class: 'person__name', text: m.name }),
+    self ? h('span', { class: 'tag tag--accent', text: 'Twój list' }) : null),
+  h('span', {
+    class: `person__preview${text ? '' : ' is-empty'}`,
+    text: text ? capFirst(text) : (self ? 'Nie masz jeszcze listu.' : 'Bez listu.'),
+  }),
+  h('span', { class: 'person__meta' },
+    h('span', { text: m.wishCount ? count(m.wishCount, FORMS.wish) : 'Brak życzeń' }),
+    icon('arrow-right', 'icon icon--sm person__arrow')));
+}
+
+// ---------- List: treść ----------
+
+function letterBody(text) {
+  const id = uid('letter');
+  const body = h('div', { class: 'letter__body', id },
+    h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
+    h('p', { class: 'letter__text', text }));
+  const long = text.length > 260 || text.split('\n').length > 5;
+  if (!long) return body;
+  body.classList.add('is-clamped');
+  const more = h('button', { type: 'button', class: 'text-btn', 'aria-expanded': 'false', 'aria-controls': id }, 'Czytaj całość');
+  more.addEventListener('click', () => {
+    const open = !body.classList.toggle('is-clamped');
+    more.setAttribute('aria-expanded', String(open));
+    more.textContent = open ? 'Zwiń' : 'Czytaj całość';
+  });
+  return h('div', null, body, more);
 }
 
 // ---------- Mój list ----------
 
 function viewMine({ member, wishes }) {
-  const editor = state.editingLetter && letterNode ? letterNode : (letterNode = letterEditor(member.letter, state.me.user.name));
-  const addBtn = h('button', { type: 'button', class: 'btn btn--primary', 'data-fkey': 'add-wish' }, icon('plus'), 'Dodaj życzenie');
-  addBtn.addEventListener('click', () => openWishDialog(null));
-
+  const editor = state.editingLetter && letterNode ? letterNode : (letterNode = letterEditor(member.letter));
   const list = wishes.length
-    ? h('ul', { class: 'wish-list', role: 'list' }, wishes.map(w => h('li', null, ownWishCard(w))))
-    : emptyState({
-      artName: 'empty-letter',
-      title: 'Lista jest jeszcze pusta',
-      text: 'Dodaj pierwsze życzenie. Może być konkretne — z linkiem i ceną — albo całkiem ogólne, np. „dobra książka o górach”.',
-      action: (() => {
-        const b = h('button', { type: 'button', class: 'btn btn--ink', 'data-fkey': 'add-first' }, icon('plus'), 'Dodaj pierwsze życzenie');
-        b.addEventListener('click', () => openWishDialog(null));
-        return b;
-      })(),
-    });
+    ? h('ul', { class: 'wishes', role: 'list' }, wishes.map(w => h('li', null, ownWishCard(w))))
+    : h('p', { class: 'empty__text', text: 'Lista jest pusta. Życzenie może być konkretne — z linkiem i ceną — albo ogólne, np. „dobra książka o górach”.' });
 
-  return h('div', { class: 'page container' },
-    pageHead({ eyebrow: 'Twój list', title: 'Mój list do Mikołaja', lede: 'Napisz kilka słów i dodaj życzenia. Bliscy zobaczą je na Twojej kopercie.' }),
-    h('section', { class: 'privacy', 'aria-label': 'Prywatność Twojej listy' },
-      h('span', { class: 'privacy__seal', 'aria-hidden': 'true' }, icon('eye-off')),
-      h('div', null,
-        h('p', { class: 'privacy__title', text: 'Ktoś coś szykuje? Tego nie zdradzimy.' }),
-        h('p', { class: 'privacy__text', text: 'Na własnej liście nie zobaczysz rezerwacji, zakupów ani tego, kto się czym zajął. Niespodzianka zostaje niespodzianką.' }))),
-    h('div', { class: 'split' },
-      h('div', { class: 'split__aside' }, editor),
-      h('section', { class: 'split__main', 'aria-labelledby': 'wishes-h' },
-        h('div', { class: 'section-head' },
-          h('div', { class: 'section-head__title' },
-            h('h2', { class: 'section-title', id: 'wishes-h', text: 'Życzenia' }),
-            countChip(wishes.length)),
-          wishes.length ? addBtn : null),
-        list)));
+  return h('div', { class: 'page page--narrow container' },
+    pageHead({ title: 'Mój list', meta: quiet('eye-off', 'Rodzina widzi Twój list. Rezerwacji tu nie zobaczysz.') }),
+    editor,
+    h('section', { class: 'section', 'aria-labelledby': 'wishes-h' },
+      sectionHead('wishes-h', 'Życzenia', wishes.length, addWishButton('add-wish')),
+      list));
 }
 
-function letterEditor(initialText, signature) {
+function letterEditor(initialText) {
   let saved = initialText;
   const root = h('section', { class: 'letter', 'aria-labelledby': 'letter-h' });
 
@@ -1228,17 +1142,16 @@ function letterEditor(initialText, signature) {
     state.editingLetter = false;
     state.letterDirty = false;
     const has = saved.trim().length > 0;
-    const editBtn = h('button', { type: 'button', class: 'btn btn--secondary', 'data-fkey': 'letter-edit' }, icon('edit'), has ? 'Edytuj list' : 'Napisz list');
+    const editBtn = h('button', {
+      type: 'button', class: 'btn btn--ghost btn--sm', 'data-fkey': 'letter-edit',
+      'aria-label': has ? 'Edytuj list' : 'Napisz list',
+    }, icon('edit', 'icon icon--sm'), has ? 'Edytuj' : 'Napisz');
     editBtn.addEventListener('click', edit);
     root.replaceChildren(
-      h('h2', { class: 'sr-only', id: 'letter-h', text: 'Twój list' }),
-      h('div', { class: 'letter__paper' },
-        h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
-        has
-          ? h('p', { class: 'letter__text', text: saved })
-          : h('p', { class: 'letter__text letter__text--empty', text: 'Tu jeszcze nic nie ma. Napisz, co Cię cieszy, jaki nosisz rozmiar, co już masz — i czego na pewno nie chcesz.' }),
-        has ? h('p', { class: 'letter__sign', text: signature }) : null),
-      h('div', { class: 'letter__actions' }, editBtn));
+      sectionHead('letter-h', 'List', 0, editBtn),
+      has
+        ? letterBody(saved)
+        : h('p', { class: 'empty__text', text: 'Napisz kilka słów: co Cię cieszy, jaki nosisz rozmiar, czego na pewno nie chcesz.' }));
   };
 
   const edit = () => {
@@ -1246,13 +1159,13 @@ function letterEditor(initialText, signature) {
     letterNode = root;
     const alert = formAlert();
     const textarea = h('textarea', {
-      id: 'letter-input', class: 'letter__input', maxlength: LIMITS.letter, rows: 9,
-      placeholder: 'Piszę do Ciebie, bo…', 'aria-describedby': 'letter-count',
+      id: 'letter-input', class: 'input letter__input', maxlength: LIMITS.letter, rows: 7,
+      placeholder: 'Piszę, bo…', 'aria-describedby': 'letter-count',
     });
     textarea.value = saved;
-    const counter = h('p', { id: 'letter-count', class: 'letter__count' });
-    const save = h('button', { type: 'submit', class: 'btn btn--primary' }, icon('check'), 'Zapisz list');
-    const cancel = h('button', { type: 'button', class: 'btn btn--ghost' }, 'Anuluj');
+    const counter = h('p', { id: 'letter-count', class: 'field__hint' });
+    const save = h('button', { type: 'submit', class: 'btn btn--primary btn--sm' }, 'Zapisz list');
+    const cancel = h('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Anuluj');
     const update = () => {
       counter.textContent = `${textarea.value.length} / ${LIMITS.letter} · Ctrl + Enter zapisuje`;
       state.letterDirty = textarea.value !== saved;
@@ -1261,11 +1174,10 @@ function letterEditor(initialText, signature) {
     let busy = false;
 
     const form = h('form', { class: 'letter__form', novalidate: true },
-      h('div', { class: 'letter__paper letter__paper--editing' },
-        h('p', { class: 'letter__salutation', 'aria-hidden': 'true', text: 'Drogi Mikołaju,' }),
-        h('label', { class: 'sr-only', for: 'letter-input', text: 'Treść listu do Mikołaja' }),
-        textarea,
-        counter),
+      h('p', { class: 'letter__salutation', 'aria-hidden': 'true', text: 'Drogi Mikołaju,' }),
+      h('label', { class: 'sr-only', for: 'letter-input', text: 'Treść listu' }),
+      textarea,
+      counter,
       alert.el,
       h('div', { class: 'letter__actions' }, save, cancel));
     form.addEventListener('submit', async e => {
@@ -1295,7 +1207,7 @@ function letterEditor(initialText, signature) {
       else if (e.key === 'Escape' && !state.letterDirty) { e.preventDefault(); finish(); }
     });
     update();
-    root.replaceChildren(h('h2', { class: 'sr-only', id: 'letter-h', text: 'Twój list' }), form);
+    root.replaceChildren(sectionHead('letter-h', 'List', 0, null), form);
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   };
@@ -1304,55 +1216,45 @@ function letterEditor(initialText, signature) {
   return root;
 }
 
-function wishCardBase(w, { extraClass = '', stamp = null } = {}) {
+function wishCardBase(w, extraClass = '') {
   const titleId = uid('w');
-  const article = h('article', { class: `wish${extraClass ? ` ${extraClass}` : ''}`, 'aria-labelledby': titleId },
-    stamp,
+  return h('article', { class: `wish${extraClass ? ` ${extraClass}` : ''}`, 'aria-labelledby': titleId },
     h('div', { class: 'wish__head' },
       h('h3', { class: 'wish__title', id: titleId, text: w.title }),
       w.price !== null ? h('p', { class: 'wish__price' }, h('span', { class: 'sr-only', text: 'Cena: ' }), formatPrice(w.price)) : null),
     w.note ? h('p', { class: 'wish__note', text: w.note }) : null,
     w.url ? h('a', { class: 'wish__link', href: w.url, target: '_blank', rel: 'noopener noreferrer' },
-      icon('external', 'icon icon--sm'),
       h('span', { text: displayHost(w.url) }),
+      icon('external', 'icon icon--xs'),
       h('span', { class: 'sr-only', text: ' (otwiera się w nowej karcie)' })) : null);
-  return article;
-}
-
-function stampEl(text, tone, wishId) {
-  return h('span', {
-    class: `seal-stamp${tone === 'pine' ? ' seal-stamp--pine' : ''}${state.justChanged === wishId ? ' is-new' : ''}`,
-    'aria-hidden': 'true',
-    text,
-  });
 }
 
 function ownWishCard(w) {
   const card = wishCardBase(w);
-  const edit = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-fkey': `edit-${w.id}`, 'aria-label': `Edytuj: ${w.title}` }, icon('edit', 'icon icon--sm'), 'Edytuj');
-  const del = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-fkey': `del-${w.id}`, 'aria-label': `Usuń: ${w.title}` }, icon('trash', 'icon icon--sm'), 'Usuń');
+  const edit = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-fkey': `edit-${w.id}`, 'aria-label': `Edytuj: ${w.title}` }, 'Edytuj');
+  const del = h('button', { type: 'button', class: 'btn btn--ghost btn--sm', 'data-fkey': `del-${w.id}`, 'aria-label': `Usuń: ${w.title}` }, 'Usuń');
   edit.addEventListener('click', () => openWishDialog(w));
   del.addEventListener('click', () => confirmAction({
     title: 'Usunąć życzenie?',
     message: `„${w.title}” zniknie z Twojej listy. Tej operacji nie można cofnąć.`,
-    confirmLabel: 'Usuń życzenie',
+    confirmLabel: 'Usuń',
     action: async () => {
       await api('DELETE', `/api/wishes/${encodeURIComponent(w.id)}`);
       await refreshView();
       toast('Życzenie usunięte.', { tone: 'success' });
     },
   }));
-  card.append(h('div', { class: 'wish__foot' }, h('span', { class: 'wish__status', text: 'Widoczne dla rodziny' }), edit, del));
+  card.append(h('div', { class: 'wish__foot' }, edit, del));
   return card;
 }
 
 function openWishDialog(existing) {
   const editing = Boolean(existing);
-  const fTitle = field({ label: 'Czego sobie życzysz?', name: 'title', required: true, maxlength: LIMITS.title, value: existing?.title, placeholder: 'np. Wełniany szalik w kolorze butelkowej zieleni', autocomplete: 'off' });
-  const fNote = field({ label: 'Notatka', name: 'note', multiline: true, rows: 3, optional: true, maxlength: LIMITS.note, value: existing?.note, hint: 'Rozmiar, kolor, wariant, gdzie kupić — wszystko, co pomoże trafić.' });
+  const fTitle = field({ label: 'Czego sobie życzysz?', name: 'title', required: true, maxlength: LIMITS.title, value: existing?.title, placeholder: 'np. Wełniany szalik', autocomplete: 'off' });
+  const fNote = field({ label: 'Notatka', name: 'note', multiline: true, rows: 3, optional: true, maxlength: LIMITS.note, value: existing?.note, hint: 'Rozmiar, kolor, wariant — co pomoże trafić.' });
   const fUrl = field({ label: 'Link', name: 'url', type: 'url', inputmode: 'url', optional: true, maxlength: LIMITS.url, value: existing?.url ?? '', placeholder: 'https://…', spellcheck: false, autocapitalize: 'none', autocomplete: 'off' });
   const fPrice = field({
-    label: 'Cena w złotych', name: 'price', inputmode: 'decimal', optional: true, autocomplete: 'off', placeholder: 'np. 149,99',
+    label: 'Cena', name: 'price', inputmode: 'decimal', optional: true, autocomplete: 'off', placeholder: 'np. 149,99',
     value: existing && existing.price !== null ? priceInputValue(existing.price) : '',
     trailing: h('span', { class: 'field__suffix', 'aria-hidden': 'true', text: 'zł' }),
   });
@@ -1395,61 +1297,85 @@ function openWishDialog(existing) {
       dlg.setBusy(false);
       dlg.close();
       await refreshView();
-      toast(editing ? 'Zapisano zmiany.' : `Dodano do listy: ${body.title}`, { tone: 'success' });
+      toast(editing ? 'Zapisano zmiany.' : `Dodano do Twojego listu: ${body.title}`, { tone: 'success' });
     },
   });
 }
 
 // ---------- List innej osoby ----------
 
+function filterControl(options, get, set) {
+  const group = h('div', { class: 'segmented segmented--sm', role: 'group', 'aria-label': 'Pokaż życzenia' });
+  const sync = () => { for (const b of group.children) b.setAttribute('aria-pressed', String(b.value === get())); };
+  for (const o of options) {
+    const b = h('button', { type: 'button', class: 'segmented__btn', value: o.value, 'data-fkey': `filter-${o.value}` }, o.label);
+    b.addEventListener('click', () => { if (get() !== o.value) { set(o.value); sync(); } });
+    group.append(b);
+  }
+  sync();
+  return group;
+}
+
+function memberLetter(member) {
+  const disclosure = h('details', {
+    class: 'letter letter--fold',
+    open: letterDisclosureState.get(member.id) ?? matchMedia('(min-width: 801px)').matches,
+  },
+  h('summary', { class: 'letter__summary', 'data-fkey': 'member-letter' },
+    h('h2', { class: 'section-title', text: 'List' }),
+    h('span', { class: 'letter__read', text: 'Przeczytaj' }),
+    icon('arrow-right', 'icon icon--sm')),
+  h('div', { class: 'letter__body' },
+    h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
+    h('p', { class: 'letter__text', text: member.letter })));
+  disclosure.addEventListener('toggle', () => {
+    if (disclosure.isConnected) letterDisclosureState.set(member.id, disclosure.open);
+  });
+  return disclosure;
+}
+
 function viewMember({ member, wishes }) {
   const free = wishes.filter(w => !w.reserved).length;
+  const takenByOthers = wishes.filter(w => w.reserved && !w.reservedByMe).length;
   const hasLetter = member.letter.trim().length > 0;
-  const lede = wishes.length
-    ? `${count(wishes.length, FORMS.wish)} na liście · wolne: ${free}`
+
+  // „Dostępne” ukrywa tylko prezenty zajęte przez innych; Twoje rezerwacje zostają widoczne.
+  const slot = h('div', { class: 'wishes-slot' });
+  const fill = () => {
+    const items = state.memberFilter === 'free' ? wishes.filter(w => !w.reserved || w.reservedByMe) : wishes;
+    slot.replaceChildren(items.length
+      ? h('ul', { class: 'wishes', role: 'list' }, items.map(w => h('li', null, otherWishCard(w))))
+      : h('p', { class: 'empty__text', text: wishes.length ? 'Wszystko z tej listy jest już zajęte.' : 'Na tej liście nie ma jeszcze życzeń.' }));
+  };
+  fill();
+  const filter = takenByOthers
+    ? filterControl([{ value: 'all', label: 'Wszystkie' }, { value: 'free', label: 'Dostępne' }],
+      () => state.memberFilter, v => { state.memberFilter = v; fill(); })
     : null;
 
-  const list = wishes.length
-    ? h('ul', { class: 'wish-list', role: 'list' }, wishes.map(w => h('li', null, otherWishCard(w))))
-    : emptyState({
-      artName: 'empty-letter',
-      title: 'Na tej liście nie ma jeszcze życzeń',
-      text: `Gdy ${member.name} coś doda, pojawi się to tutaj. Zajrzyj później.`,
-    });
-
-  return h('div', { class: 'page container' },
-    h('a', { class: 'back-link', href: '#/' }, icon('arrow-left'), 'Wszystkie listy'),
-    pageHead({ eyebrow: 'List od', title: member.name, lede }),
-    h('p', { class: 'quiet-note' }, icon('lock', 'icon icon--sm'),
-      h('span', { text: `${member.name} nie widzi rezerwacji. Ty też nie zobaczysz, kto zarezerwował pozostałe prezenty.` })),
-    h('div', { class: 'split' },
-      h('div', { class: 'split__aside' },
-        h('section', { class: 'letter', 'aria-labelledby': 'letter-h' },
-          h('h2', { class: 'sr-only', id: 'letter-h', text: `List: ${member.name}` }),
-          h('div', { class: 'letter__paper' },
-            h('p', { class: 'letter__salutation', text: 'Drogi Mikołaju,' }),
-            hasLetter
-              ? h('p', { class: 'letter__text', text: member.letter })
-              : h('p', { class: 'letter__text letter__text--empty', text: 'Ten list nie ma jeszcze treści. Może życzenia obok powiedzą więcej.' }),
-            hasLetter ? h('p', { class: 'letter__sign', text: member.name }) : null))),
-      h('section', { class: 'split__main', 'aria-labelledby': 'wishes-h' },
-        h('div', { class: 'section-head' },
-          h('div', { class: 'section-head__title' },
-            h('h2', { class: 'section-title', id: 'wishes-h', text: 'Życzenia' }),
-            countChip(wishes.length))),
-        list)));
+  return h('div', { class: 'page page--narrow container' },
+    pageHead({
+      back: h('a', { class: 'back-link', href: '#/' }, icon('arrow-left', 'icon icon--sm'), 'Listy bliskich'),
+      title: member.name,
+      meta: wishes.length ? `${count(wishes.length, FORMS.wish)} · wolne: ${free}` : 'Brak życzeń',
+      note: quiet('lock', `${member.name} nie widzi rezerwacji. Nie pokazujemy też, kto co zarezerwował.`),
+    }),
+    hasLetter ? memberLetter(member) : null,
+    h('section', { class: 'section', 'aria-labelledby': 'wishes-h' },
+      sectionHead('wishes-h', 'Życzenia', wishes.length, filter),
+      slot));
 }
 
 function purchasedToggle(w) {
   const btn = h('button', {
-    type: 'button', class: 'toggle', 'aria-pressed': String(w.purchased),
+    type: 'button', class: 'check', 'aria-pressed': String(w.purchased),
     'data-fkey': `buy-${w.id}`, 'aria-label': `Kupione: ${w.title}`,
   },
-  h('span', { class: 'toggle__box', 'aria-hidden': 'true' }, icon('check', 'icon icon--sm')),
+  h('span', { class: 'check__box', 'aria-hidden': 'true' }, icon('check', 'icon icon--xs')),
   h('span', { text: 'Kupione' }));
   btn.addEventListener('click', () => act(btn,
     () => api('PATCH', `/api/wishes/${encodeURIComponent(w.id)}/reserve`, { purchased: !w.purchased }),
-    { success: w.purchased ? `Cofnięto oznaczenie zakupu: ${w.title}` : `Oznaczono jako kupione: ${w.title}`, changed: w.id }));
+    { success: w.purchased ? `Cofnięto oznaczenie zakupu: ${w.title}` : `Oznaczono jako kupione: ${w.title}` }));
   return btn;
 }
 
@@ -1457,7 +1383,7 @@ function cancelReservationButton(w) {
   const btn = h('button', {
     type: 'button', class: 'btn btn--ghost btn--sm',
     'data-fkey': `cancel-${w.id}`, 'aria-label': `Zrezygnuj z rezerwacji: ${w.title}`,
-  }, icon('undo', 'icon icon--sm'), 'Zrezygnuj');
+  }, 'Zrezygnuj');
   const run = () => api('DELETE', `/api/wishes/${encodeURIComponent(w.id)}/reserve`);
   btn.addEventListener('click', () => {
     if (w.purchased) {
@@ -1474,62 +1400,63 @@ function cancelReservationButton(w) {
   return btn;
 }
 
+function changedNote(text, link) {
+  return h('p', { class: 'inline-note', role: 'note' },
+    icon('info', 'icon icon--sm'),
+    h('span', null, text, link ? ' ' : null, link));
+}
+
 function otherWishCard(w) {
   if (!w.reserved) {
     const card = wishCardBase(w);
     const reserve = h('button', {
       type: 'button', class: 'btn btn--primary btn--sm',
       'data-fkey': `res-${w.id}`, 'aria-label': `Zarezerwuj: ${w.title}`,
-    }, icon('gift', 'icon icon--sm'), 'Zarezerwuj');
+    }, 'Zarezerwuj');
     reserve.addEventListener('click', () => act(reserve,
       () => api('POST', `/api/wishes/${encodeURIComponent(w.id)}/reserve`, {}),
-      { success: `Zarezerwowano: ${w.title}. Nikt nie dowie się, że to Ty.`, changed: w.id }));
-    card.append(h('div', { class: 'wish__foot' }, h('span', { class: 'wish__status', text: 'Wolne' }), reserve));
+      { success: `Zarezerwowano: ${w.title}. Nikt nie dowie się, że to Ty.` }));
+    card.append(h('div', { class: 'wish__foot' }, reserve));
     return card;
   }
   if (w.reservedByMe) {
     // Zakup dotyczy wersji z chwili rezerwacji — nie przypisujemy go zmienionemu życzeniu.
     const changed = w.changedSinceReservation === true;
-    const bought = w.purchased && !changed;
-    const card = wishCardBase(w, { extraClass: 'wish--mine', stamp: stampEl(bought ? 'Kupione' : 'Twoje', 'pine', w.id) });
+    const card = wishCardBase(w, 'wish--mine');
     if (changed) {
-      card.append(changedNotice('Autor zmienił to życzenie po Twojej rezerwacji. Wersję z chwili rezerwacji i status zakupu znajdziesz w Moich rezerwacjach.',
-        h('a', { class: 'text-link', href: '#/rezerwacje' }, 'Przejdź do moich rezerwacji', icon('arrow-right', 'icon icon--sm'))));
+      card.append(changedNote('Zmienione po Twojej rezerwacji. Wersja z chwili rezerwacji i status zakupu są w zakładce',
+        h('a', { class: 'text-link text-link--inline', href: '#/rezerwacje' }, 'Prezenty')));
     }
     card.append(h('div', { class: 'wish__foot' },
-      h('span', { class: 'wish__status wish__status--mine' }, icon('check', 'icon icon--sm'), bought ? 'Kupione przez Ciebie' : 'Twoja rezerwacja'),
+      h('span', { class: 'tag tag--accent wish__status', text: 'Twoja rezerwacja' }),
       changed ? null : purchasedToggle(w),
       cancelReservationButton(w)));
     return card;
   }
-  const card = wishCardBase(w, { extraClass: 'wish--taken', stamp: stampEl(w.purchased ? 'Kupione' : 'Zajęte', 'red', w.id) });
+  const card = wishCardBase(w, 'wish--taken');
   card.append(h('div', { class: 'wish__foot' },
-    h('span', { class: 'wish__status wish__status--taken', text: w.purchased ? 'Ktoś już to kupił.' : 'Ktoś już to szykuje.' })));
+    h('span', { class: 'tag tag--muted wish__status', text: w.purchased ? 'Kupione' : 'Zajęte' })));
   return card;
 }
 
-// ---------- Moje rezerwacje ----------
+// ---------- Moje prezenty ----------
 
 function viewReservations(wishes) {
-  const head = pageHead({
-    eyebrow: 'Tylko dla Ciebie',
-    title: 'Moje rezerwacje',
-    lede: 'Prezenty, którymi się zajmujesz. Inni widzą tylko, że są zajęte — nie wiedzą, przez kogo.',
-  });
+  const note = quiet('lock', 'Inni widzą tylko, że prezent jest zajęty — nie wiedzą, przez kogo.');
   if (!wishes.length) {
-    return h('div', { class: 'page container' }, head, emptyState({
-      level: 'h2',
-      artName: 'empty-gift',
-      title: 'Nie masz jeszcze rezerwacji',
-      text: 'Otwórz list kogoś z rodziny i wybierz prezent. Zarezerwowane rzeczy trafią tutaj — razem z listą zakupów.',
-      action: h('a', { class: 'btn btn--ink', href: '#/' }, icon('family'), 'Przejrzyj listy rodziny'),
-    }));
+    return h('div', { class: 'page page--narrow container' },
+      pageHead({ title: 'Moje prezenty', note }),
+      h('div', { class: 'empty' },
+        h('p', { class: 'empty__text', text: 'Nie masz jeszcze rezerwacji. Otwórz listę bliskiej osoby i wybierz prezent.' }),
+        h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Listy bliskich')));
   }
 
   const bought = wishes.filter(w => w.purchased).length;
   const priced = wishes.filter(w => w.price !== null);
   const sum = Math.round(priced.reduce((s, w) => s + w.price, 0) * 100) / 100;
   const unpriced = wishes.length - priced.length;
+  let meta = `${count(wishes.length, FORMS.gift)} · kupione: ${bought} z ${wishes.length}`;
+  if (priced.length) meta += ` · razem ${formatPrice(sum)}${unpriced ? ` (bez ceny: ${unpriced})` : ''}`;
 
   const groups = new Map();
   for (const w of wishes) {
@@ -1538,47 +1465,29 @@ function viewReservations(wishes) {
     groups.get(key).items.push(w);
   }
 
-  const tally = h('dl', { class: 'tally' },
-    h('div', { class: 'tally__item' }, h('dt', { text: 'Rezerwacje' }), h('dd', { text: String(wishes.length) })),
-    h('div', { class: 'tally__item' }, h('dt', { text: 'Kupione' }), h('dd', null, `${bought}`, h('small', { text: `z ${wishes.length}` }))),
-    h('div', { class: 'tally__item' }, h('dt', { text: 'Razem' }),
-      h('dd', null, priced.length ? formatPrice(sum) : '—', unpriced ? h('small', { text: `bez ceny: ${unpriced}` }) : null)));
-
-  const progress = h('progress', { class: 'progress', max: String(wishes.length), value: String(bought), 'aria-label': `Kupione: ${bought} z ${wishes.length}` });
-
   const sections = [...groups.values()].map(g => {
     const headingId = uid('g');
-    return h('section', { class: 'group', 'aria-labelledby': headingId },
-      h('div', { class: 'group__head' },
-        h('h2', { class: 'group__title', id: headingId }, h('span', { text: 'dla' }), g.ownerName),
-        g.ownerId ? h('a', { class: 'text-link', href: `#/osoba/${encodeURIComponent(g.ownerId)}` }, 'Zobacz list', icon('arrow-right', 'icon icon--sm')) : null),
-      h('ul', { class: 'wish-list', role: 'list' }, g.items.map(w => h('li', null, reservedWishCard(w)))));
+    return h('section', { class: 'section', 'aria-labelledby': headingId },
+      sectionHead(headingId, g.ownerName, g.items.length,
+        g.ownerId ? h('a', { class: 'text-link', href: `#/osoba/${encodeURIComponent(g.ownerId)}` }, 'Otwórz list', h('span', { class: 'sr-only', text: `: ${g.ownerName}` })) : null),
+      h('ul', { class: 'wishes', role: 'list' }, g.items.map(w => h('li', null, reservedWishCard(w)))));
   });
 
-  return h('div', { class: 'page container' }, head, tally, progress, sections);
-}
-
-function changedNotice(text, link) {
-  return h('div', { class: 'callout callout--note', role: 'note' },
-    icon('alert'),
-    h('div', { class: 'callout__body' },
-      h('p', { text }),
-      link ? h('p', null, link) : null));
+  return h('div', { class: 'page page--narrow container' },
+    pageHead({ title: 'Moje prezenty', meta, note }),
+    sections);
 }
 
 function reservedWishCard(w) {
-  const card = wishCardBase(w, { extraClass: 'wish--mine', stamp: w.purchased ? stampEl('Kupione', 'pine', w.id) : null });
+  const card = wishCardBase(w, 'wish--mine');
   if (w.changedSinceReservation) {
-    card.append(w.ownerId
-      ? changedNotice('Autor zmienił życzenie. Tu zachowaliśmy dane z chwili rezerwacji.',
-        h('a', { class: 'text-link', href: `#/osoba/${encodeURIComponent(w.ownerId)}` },
-          'Sprawdź aktualną listę', h('span', { class: 'sr-only', text: `: ${w.ownerName}` }), icon('arrow-right', 'icon icon--sm')))
-      : changedNotice('Autor zmienił życzenie. Tu zachowaliśmy dane z chwili rezerwacji. Sprawdź aktualną listę.'));
+    card.append(changedNote('Autor zmienił to życzenie. Tu widać wersję z chwili rezerwacji.',
+      w.ownerId
+        ? h('a', { class: 'text-link text-link--inline', href: `#/osoba/${encodeURIComponent(w.ownerId)}` },
+          'Zobacz aktualną', h('span', { class: 'sr-only', text: `: ${w.ownerName}` }))
+        : null));
   }
-  card.append(h('div', { class: 'wish__foot' },
-    h('span', { class: 'wish__status wish__status--mine', text: w.purchased ? 'Kupione' : 'Do kupienia' }),
-    purchasedToggle(w),
-    cancelReservationButton(w)));
+  card.append(h('div', { class: 'wish__foot' }, purchasedToggle(w), cancelReservationButton(w)));
   return card;
 }
 
@@ -1586,29 +1495,20 @@ function reservedWishCard(w) {
 
 function viewInvite() {
   const { user, family } = state.me;
+  const back = h('a', { class: 'btn btn--secondary btn--sm', href: '#/' }, 'Listy bliskich');
   if (DEMO) {
-    return h('div', { class: 'page container' },
-      pageHead({
-        eyebrow: 'Zaproszenia',
-        title: 'Zaproszenia',
-        lede: 'W podglądzie UX zaproszenia są wyłączone. To przykładowa rodzina, więc nie ma komu wysłać linku — prawdziwe zaproszenia działają tylko w chronionej wersji aplikacji.',
-      }),
-      h('a', { class: 'btn btn--secondary', href: '#/' }, icon('arrow-left'), 'Wróć do rodziny'));
+    return h('div', { class: 'page page--narrow container' },
+      pageHead({ title: 'Zaproszenia', meta: 'W podglądzie zaproszenia są wyłączone — to przykładowa rodzina.' }), back);
   }
   if (!user.isAdmin) {
-    return h('div', { class: 'page container' },
-      pageHead({
-        eyebrow: 'Zaproszenia',
-        title: 'Zaproszenia',
-        lede: 'Link zaproszenia udostępnia osoba, która założyła rodzinę w Mikołaju. Poproś ją o link dla nowych członków rodziny.',
-      }),
-      h('a', { class: 'btn btn--secondary', href: '#/' }, icon('arrow-left'), 'Wróć do rodziny'));
+    return h('div', { class: 'page page--narrow container' },
+      pageHead({ title: 'Zaproszenia', meta: 'Link zaproszenia udostępnia osoba, która założyła rodzinę. Poproś ją o link.' }), back);
   }
 
   const area = h('div', { class: 'invite__area' });
   renderInviteArea(area);
 
-  const rotate = h('button', { type: 'button', class: 'btn btn--danger', 'data-fkey': 'invite-rotate' }, icon('refresh'), 'Wygeneruj nowy link');
+  const rotate = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', 'data-fkey': 'invite-rotate' }, icon('refresh', 'icon icon--sm'), 'Wygeneruj nowy link');
   rotate.addEventListener('click', () => confirmAction({
     title: 'Wygenerować nowy link?',
     message: 'Poprzedni link przestanie działać — nikt już przez niego nie dołączy. Nowy link trzeba będzie wysłać ponownie.',
@@ -1620,30 +1520,22 @@ function viewInvite() {
     },
   }));
 
-  return h('div', { class: 'page container' },
-    pageHead({ eyebrow: 'Zaproszenia', title: 'Zaproś rodzinę', lede: `Każda osoba z linkiem może dołączyć do rodziny „${family.name}”, zobaczyć listy i rezerwować prezenty.` }),
-    h('div', { class: 'invite' },
-      h('section', { class: 'invite__card paper', 'aria-labelledby': 'invite-h' },
-        h('div', { class: 'invite__art' }, art('step-seal')),
-        h('h2', { class: 'section-title', id: 'invite-h', text: 'Prywatny link zaproszenia' }),
-        h('p', { class: 'muted', text: 'Wysyłaj go tylko bliskim, w prywatnej wiadomości. Nie publikuj go w mediach społecznościowych ani w grupach, do których należą obce osoby.' }),
-        area),
-      h('aside', { class: 'invite__aside', 'aria-label': 'Jak zapraszać' },
-        h('h2', { class: 'section-title', text: 'Jak to działa' }),
-        h('ol', { class: 'mini-steps', role: 'list' },
-          h('li', { text: 'Skopiuj link i wyślij go SMS-em lub w komunikatorze. Mikołaj sam nie wysyła e-maili.' }),
-          h('li', { text: 'Bliska osoba otwiera link i podaje imię, e-mail oraz hasło.' }),
-          h('li', { text: 'Gotowe — jej koperta pojawi się na stronie rodziny.' })),
-        h('div', { class: 'danger-zone' },
-          h('h3', { text: 'Link trafił w niepowołane ręce?' }),
-          h('p', { text: 'Wygeneruj nowy. Poprzedni od razu przestanie działać, a konta osób, które już dołączyły, pozostaną bez zmian.' }),
-          rotate))));
+  return h('div', { class: 'page page--narrow container' },
+    pageHead({ title: 'Zaproś bliskich', meta: `Osoba z linkiem może dołączyć do rodziny „${family.name}”.` }),
+    h('section', { class: 'panel', 'aria-labelledby': 'invite-h' },
+      h('h2', { class: 'section-title', id: 'invite-h', text: 'Link zaproszenia' }),
+      h('p', { class: 'muted', text: 'Wyślij go tylko bliskim, SMS-em lub w komunikatorze. Mikołaj nie wysyła e-maili.' }),
+      area),
+    h('section', { class: 'panel panel--quiet', 'aria-labelledby': 'rotate-h' },
+      h('h2', { class: 'section-title', id: 'rotate-h', text: 'Link trafił w niepowołane ręce?' }),
+      h('p', { class: 'muted', text: 'Wygeneruj nowy. Poprzedni od razu przestanie działać; konta, które już dołączyły, zostaną.' }),
+      h('div', null, rotate)));
 }
 
 function renderInviteArea(area) {
   if (!state.inviteUrl) {
     const alert = formAlert();
-    const reveal = h('button', { type: 'button', class: 'btn btn--ink', 'data-fkey': 'invite-reveal' }, icon('eye'), 'Pokaż link zaproszenia');
+    const reveal = h('button', { type: 'button', class: 'btn btn--primary btn--sm', 'data-fkey': 'invite-reveal' }, icon('eye', 'icon icon--sm'), 'Pokaż link');
     reveal.addEventListener('click', async () => {
       if (reveal.disabled) return;
       alert.clear();
@@ -1667,15 +1559,14 @@ function renderInviteArea(area) {
   input.value = url;
   input.addEventListener('focus', () => input.select());
 
-  const copyLabel = h('span', { text: 'Kopiuj link' });
-  const copy = h('button', { type: 'button', class: 'btn btn--primary', 'data-fkey': 'invite-copy' }, icon('copy'), copyLabel);
+  const copy = h('button', { type: 'button', class: 'btn btn--primary', 'data-fkey': 'invite-copy' }, icon('copy', 'icon icon--sm'), h('span', { text: 'Kopiuj' }));
   let resetTimer = 0;
   copy.addEventListener('click', async () => {
     const ok = await copyText(url, input);
     if (ok) {
-      copy.replaceChildren(icon('check'), h('span', { text: 'Skopiowano' }));
+      copy.replaceChildren(icon('check', 'icon icon--sm'), h('span', { text: 'Skopiowano' }));
       clearTimeout(resetTimer);
-      resetTimer = setTimeout(() => { if (copy.isConnected) copy.replaceChildren(icon('copy'), h('span', { text: 'Kopiuj link' })); }, 2200);
+      resetTimer = setTimeout(() => { if (copy.isConnected) copy.replaceChildren(icon('copy', 'icon icon--sm'), h('span', { text: 'Kopiuj' })); }, 2200);
       toast('Link skopiowany. Wyślij go bliskim w prywatnej wiadomości.', { tone: 'success' });
     } else {
       input.focus();
@@ -1707,7 +1598,7 @@ function renderInviteArea(area) {
   area.replaceChildren(
     h('label', { class: 'field__label', for: 'invite-url', text: 'Link zaproszenia' }),
     h('div', { class: 'copy-row' }, input, copy),
-    h('p', { id: 'invite-url-hint', class: 'field__hint', text: 'Link działa, dopóki nie wygenerujesz nowego.' }),
+    h('p', { id: 'invite-url-hint', class: 'field__hint', text: 'Działa, dopóki nie wygenerujesz nowego.' }),
     more);
 }
 
@@ -1762,7 +1653,7 @@ function onHashChange() {
     history.replaceState(null, '', state.appHash || location.pathname + location.search);
     confirmAction({
       title: 'Porzucić zmiany w liście?',
-      message: 'Masz niezapisane zmiany w liście do Mikołaja. Jeśli przejdziesz dalej, przepadną.',
+      message: 'Masz niezapisane zmiany w liście. Jeśli przejdziesz dalej, przepadną.',
       confirmLabel: 'Porzuć zmiany',
       action: async () => {
         state.letterDirty = false;
@@ -1804,37 +1695,51 @@ function bindGlobal() {
 
 let demoSelect = null;
 
+const demoCueText = status => (status.persistent ? 'Podgląd · zapis lokalny' : 'Podgląd · tylko ta karta');
 function demoNoteText(status) {
   return status.persistent
-    ? 'Zapis lokalny, bez synchronizacji.'
-    : 'Pamięć przeglądarki jest niedostępna: zmiany zostają tylko w tej karcie i znikną po jej zamknięciu. Rodzina ich nie zobaczy.';
+    ? 'Dane przykładowe. Zmiany zapisują się tylko w tej przeglądarce, bez synchronizacji — rodzina ich nie widzi.'
+    : 'Dane przykładowe. Pamięć przeglądarki jest niedostępna: zmiany znikną po zamknięciu karty.';
 }
 
-// Pasek powstaje raz; odświeżanie widoków nie dotyka listy wyboru ani fokusu.
-function mountDemoBar(status) {
-  if (d.getElementById('demo-bar')) return false;
-  const note = h('span', { class: 'demo-bar__note', text: demoNoteText(status) });
-  demoSelect = h('select', { id: 'demo-as', class: 'demo-bar__select', name: 'demo-as' },
+// Narzędzia powstają raz, w nagłówku; odświeżanie widoków nie dotyka listy wyboru ani fokusu.
+function mountDemoTools(status) {
+  if (d.getElementById('demo-tools')) return false;
+  const cue = d.getElementById('brand-family');
+  cue.textContent = demoCueText(status);
+  cue.hidden = false;
+
+  const note = h('p', { class: 'demo__note', text: demoNoteText(status) });
+  demoSelect = h('select', { id: 'demo-as', class: 'demo__select', name: 'demo-as' },
     demoPeople().map(p => h('option', { value: p.id, text: p.name })));
   demoSelect.value = demoActiveId();
   demoSelect.addEventListener('change', () => switchDemoPerson(demoSelect.value));
-  const reset = h('button', { type: 'button', class: 'btn btn--secondary btn--sm demo-bar__reset' },
-    icon('refresh', 'icon icon--sm'), 'Od nowa', h('span', { class: 'sr-only', text: ' — przywróć dane przykładowe' }));
-  reset.addEventListener('click', confirmDemoReset);
+
+  const summary = h('summary', { class: 'icon-btn demo__toggle', 'aria-label': 'Podgląd: informacje i reset' }, icon('more'));
+  const reset = h('button', { type: 'button', class: 'btn btn--secondary btn--sm btn--block' },
+    icon('refresh', 'icon icon--sm'), 'Przywróć dane przykładowe');
+  const menu = h('details', { class: 'demo__menu' }, summary,
+    h('div', { class: 'demo__panel' },
+      h('p', { class: 'demo__title', text: 'Podgląd bez logowania' }),
+      note,
+      reset));
+  reset.addEventListener('click', () => { menu.open = false; summary.focus(); confirmDemoReset(); });
+  menu.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && menu.open) { e.preventDefault(); menu.open = false; summary.focus(); }
+  });
+  d.addEventListener('click', e => { if (menu.open && !menu.contains(e.target)) menu.open = false; });
+
   onDemoStatus(next => {
+    cue.textContent = demoCueText(next);
     const text = demoNoteText(next);
     if (note.textContent !== text) note.textContent = text;
     if (!next.persistent) toast('Nie udało się zapisać w pamięci przeglądarki. Zmiany zostają tylko w tej karcie.', { tone: 'error' });
   });
-  const bar = h('section', { id: 'demo-bar', class: 'demo-bar', 'aria-label': 'Tryb podglądu UX' },
-    h('div', { class: 'demo-bar__inner' },
-      h('p', { class: 'demo-bar__info' }, icon('info', 'icon icon--sm'),
-        h('span', null, h('strong', { class: 'demo-bar__title', text: 'Podgląd UX · dane przykładowe' }), ' ', note)),
-      h('div', { class: 'demo-bar__controls' },
-        h('label', { class: 'demo-bar__label', for: 'demo-as', text: 'Podgląd jako' }),
-        demoSelect,
-        reset)));
-  d.getElementById('notice').before(bar);
+
+  d.getElementById('tools').prepend(h('div', { class: 'demo', id: 'demo-tools' },
+    h('label', { class: 'demo__label', for: 'demo-as', text: 'Podgląd jako' }),
+    demoSelect,
+    menu));
   return true;
 }
 
@@ -1842,7 +1747,6 @@ async function showDemoPerson(message) {
   state.editingLetter = false;
   state.letterDirty = false;
   state.inviteUrl = null;
-  state.justChanged = null;
   letterNode = null;
   const me = normSession(await api('GET', '/api/me'));
   if (!me) throw bad();
@@ -1866,7 +1770,7 @@ function switchDemoPerson(id) {
     const who = demoPeople().find(p => p.id === id)?.name || 'inną osobę';
     confirmAction({
       title: 'Porzucić zmiany w liście?',
-      message: `Masz niezapisane zmiany w liście do Mikołaja. Jeśli przełączysz podgląd na: ${who}, przepadną.`,
+      message: `Masz niezapisane zmiany w liście. Jeśli przełączysz podgląd na: ${who}, przepadną.`,
       confirmLabel: 'Porzuć i przełącz',
       action: go,
     });
@@ -1880,9 +1784,9 @@ function switchDemoPerson(id) {
 
 function confirmDemoReset() {
   confirmAction({
-    title: 'Zacząć podgląd od nowa?',
-    message: `${state.letterDirty ? 'Masz niezapisane zmiany w liście — przepadną. ' : ''}Wszystkie zmiany w danych przykładowych w tej przeglądarce zostaną usunięte, a podgląd wróci do stanu początkowego. Prawdziwych danych rodziny to nie dotyczy.`,
-    confirmLabel: 'Przywróć dane przykładowe',
+    title: 'Przywrócić dane przykładowe?',
+    message: `${state.letterDirty ? 'Masz niezapisane zmiany w liście — przepadną. ' : ''}Wszystkie zmiany w podglądzie w tej przeglądarce zostaną usunięte. Prawdziwych danych rodziny to nie dotyczy.`,
+    confirmLabel: 'Przywróć',
     action: async () => {
       resetDemo();
       await showDemoPerson(() => 'Przywrócono dane przykładowe.');
@@ -1892,7 +1796,7 @@ function confirmDemoReset() {
 
 async function bootDemo() {
   const status = initDemo();
-  if (mountDemoBar(status) && status.recovered) {
+  if (mountDemoTools(status) && status.recovered) {
     toast('Zapisane dane podglądu były uszkodzone — przywrócono dane przykładowe.', { tone: 'info' });
   }
   const me = normSession(await api('GET', '/api/me'));
@@ -1905,13 +1809,9 @@ async function bootDemo() {
 // ---------- Start ----------
 
 function viewBootError(err) {
-  const retry = h('button', { type: 'button', class: 'btn btn--ink' }, icon('refresh'), 'Spróbuj ponownie');
+  const retry = h('button', { type: 'button', class: 'btn btn--primary' }, icon('refresh', 'icon icon--sm'), 'Spróbuj ponownie');
   retry.addEventListener('click', () => { mainEl().replaceChildren(viewLoading()); boot(); });
-  return h('section', { class: 'state container' },
-    art('empty-letter'),
-    h('h1', { class: 'state__title', tabindex: '-1', text: 'Nie możemy połączyć się z Mikołajem' }),
-    h('p', { class: 'state__text', text: messageOf(err) }),
-    h('div', { class: 'state__actions' }, retry));
+  return stateView('Nie udało się połączyć', messageOf(err), [retry]);
 }
 
 async function boot() {
