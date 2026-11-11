@@ -2,6 +2,16 @@
 
 Verified against the real isolated Cloudflare Worker, not local mocks. No dependency installation, compilation, bundling, Node/TypeScript linting or local server was used on Mikrus. The browser executed the deployed JavaScript.
 
+## GitHub delivery: verified push → domain
+
+The complete source and history are in private `jacjacek/mikolaj`, with default branch `master`. GitHub-hosted Actions checks the code, updates the existing Worker and verifies the exact revision, HTML, frontend bytes, CSP and anonymous API. Push to `master` publishes production; push to `develop` publishes isolated preview. Credentials are not tracked.
+
+A separate checkout cloned directly from GitHub created commit `11805d8241ce7605a49025141191ee375a8926d2`, changing the visible preview-menu heading to **Podgląd rodzinnych listów**. Its push automatically published preview. The release merge `557f266ac8b60df76759b4a456072a4d7fb2751f` then automatically published production, with no manual Worker upload from Mikrus. The actual production response matched the JavaScript blob read back from GitHub, and the new heading was visually checked on preview and production at 390×844.
+
+The production proof run completed **14 seconds after the push event was created**: https://github.com/jacjacek/mikolaj/actions/runs/43053190203. This is an observed run, not a future latency guarantee. The immutable proof snapshot is `tests/results/github-delivery.json`; later documentation or application commits normally update `/version.json` again.
+
+A real rerun of the older production workflow was also exercised: its second attempt skipped upload and deployment verification because the remote branch head had advanced, leaving the newer production revision unchanged. Both existing FAMILY namespaces and bootstrap bindings remained present; no production family data were mutated by the proof.
+
 ## Latest UI: Christmas palette and Świdermajer-inspired identity
 
 The seasonal redesign passed **40/40 checks** on the deployed isolated preview, including all 33 two-tab regression checks below. The seven theme checks verify pine/burgundy instead of lime, primary-action contrast (**10.48:1**), actual intermediate height/opacity while opening and closing at 10% playback speed, rapid toggle recovery, reduced motion, and no collected runtime/CSP errors. Report: `tests/results/falenica-preview.json`.

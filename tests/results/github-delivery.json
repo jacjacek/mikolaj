@@ -1,0 +1,56 @@
+{
+  "observedAt": "2026-11-11T16:01:14.919442+00:00",
+  "repository": "https://github.com/jacjacek/mikolaj",
+  "private": true,
+  "defaultBranch": "master",
+  "proofProductionRevision": "557f266ac8b60df76759b4a456072a4d7fb2751f",
+  "independentCloneChange": "Podgląd rodzinnych listów",
+  "githubSourceMatchesProduction": true,
+  "pushDeployments": [
+    {
+      "url": "https://github.com/jacjacek/mikolaj/actions/runs/43052335123",
+      "branch": "develop",
+      "revision": "6fcce9b0db0511890265571e7ae19d757a364cc4",
+      "event": "push",
+      "conclusion": "success",
+      "eventToCompletionSeconds": 19.0
+    },
+    {
+      "url": "https://github.com/jacjacek/mikolaj/actions/runs/43052998767",
+      "branch": "develop",
+      "revision": "11805d8241ce7605a49025141191ee375a8926d2",
+      "event": "push",
+      "conclusion": "success",
+      "eventToCompletionSeconds": 19.0
+    },
+    {
+      "url": "https://github.com/jacjacek/mikolaj/actions/runs/43053190203",
+      "branch": "master",
+      "revision": "557f266ac8b60df76759b4a456072a4d7fb2751f",
+      "event": "push",
+      "conclusion": "success",
+      "eventToCompletionSeconds": 14.0
+    }
+  ],
+  "oldRerunProtection": {
+    "rerunUrl": "https://github.com/jacjacek/mikolaj/actions/runs/43052742140",
+    "attempt": 2,
+    "oldRevision": "0a318dae329b837164b13e5b171edb0cd2c7f62b",
+    "currentRevision": "557f266ac8b60df76759b4a456072a4d7fb2751f",
+    "uploadSkipped": true,
+    "verificationSkipped": true,
+    "newProductionPreserved": true
+  },
+  "storageContinuity": [
+    {
+      "worker": "mikolaj",
+      "namespacePreserved": true,
+      "bootstrapPreserved": true
+    },
+    {
+      "worker": "mikolaj-preview",
+      "namespacePreserved": true,
+      "bootstrapPreserved": true
+    }
+  ]
+}
