@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = {'master': 'https://mikolaj.walasek.xyz', 'develop': 'https://mikolaj-preview.jac3k.workers.dev'}
+TARGETS = {'master': 'https://list.do.mikolaja.pl', 'develop': 'https://mikolaj-preview.jac3k.workers.dev'}
 AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
 APP_SCRIPT = '<script type="module" src="/app.js"></script>'
 
@@ -24,6 +24,22 @@ def fetch(base, path):
         return response.status, response.headers, response.read()
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def fetch_raw(base, path):
+    opener = urllib.request.build_opener(NoRedirect)
+    request = urllib.request.Request(base + path, headers={'User-Agent': AGENT})
+    try:
+        response = opener.open(request, timeout=25)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        return response.status, response.headers, response.read()
+
+
 def worker_csp():
     worker = (ROOT / 'src/worker.js').read_text(encoding='utf-8')
     policies = re.findall(r"'Content-Security-Policy': \"([^\"]*)\"", worker)
@@ -32,6 +48,10 @@ def worker_csp():
 
 
 def verify(base, revision, branch):
+    if branch == 'master':
+        # Stary adres musi przekierowywać na nowy.
+        status, headers, _ = fetch_raw('https://mikolaj.walasek.xyz', '/moje?x=1')
+        assert status == 301 and headers.get('Location') == base + '/moje?x=1', 'Old domain does not redirect'
     status, headers, body = fetch(base, '/version.json')
     assert status == 200 and json.loads(body) == {'revision': revision, 'branch': branch}, 'Revision has not propagated yet'
     assert 'no-store' in headers.get('Cache-Control', ''), 'Revision endpoint must not be cached'

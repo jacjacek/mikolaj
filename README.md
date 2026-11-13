@@ -20,6 +20,6 @@ Hasła: PBKDF2-SHA256 (100 000 iteracji). Sesje: losowy token, w bazie tylko has
 
 ## Wdrożenie
 
-Push do `master` → https://mikolaj.walasek.xyz, push do `develop` → https://mikolaj-preview.jac3k.workers.dev (osobne dane). Workflow `.github/workflows/deploy.yml` sprawdza składnię, wgrywa źródła i weryfikuje wdrożenie. Wersja: `/version.json`.
+Push do `master` → https://list.do.mikolaja.pl (stary adres mikolaj.walasek.xyz przekierowuje), push do `develop` → https://mikolaj-preview.jac3k.workers.dev (osobne dane). Workflow `.github/workflows/deploy.yml` sprawdza składnię, wgrywa źródła i weryfikuje wdrożenie. Wersja: `/version.json`.
 
 Aplikacja nie wysyła maili — zapomniane hasło resetuje organizator jednorazowym linkiem. **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.
