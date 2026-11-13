@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = {'master': 'https://list.do.mikolaja.pl', 'develop': 'https://mikolaj-preview.jac3k.workers.dev'}
+TARGETS = {'master': 'https://mikolaj.walasek.xyz', 'develop': 'https://mikolaj-preview.jac3k.workers.dev'}
 AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
 APP_SCRIPT = '<script type="module" src="/app.js"></script>'
 
@@ -48,7 +48,7 @@ def worker_csp():
 
 
 def verify(base, revision, branch):
-    if branch == 'master':
+    if branch == 'master' and 'mikolaja.pl' in base:
         # Stary adres musi przekierowywać na nowy.
         status, headers, _ = fetch_raw('https://mikolaj.walasek.xyz', '/moje?x=1')
         assert status == 301 and headers.get('Location') == base + '/moje?x=1', 'Old domain does not redirect'
