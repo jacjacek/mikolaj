@@ -495,8 +495,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // Stary adres — przenosimy na nowy (fragment #invite=… przeglądarka zachowuje sama).
-    // Włączane dopiero, gdy list.do.mikolaja.pl naprawdę działa (env.MOVED === '1').
-    if (env.MOVED === '1' && url.hostname === 'mikolaj.walasek.xyz' && url.pathname !== '/version.json') {
+    if (url.hostname === 'mikolaj.walasek.xyz' && url.pathname !== '/version.json') {
       return Response.redirect(`https://list.do.mikolaja.pl${url.pathname}${url.search}`, url.pathname.startsWith('/api/') ? 308 : 301);
     }
     if (url.pathname === '/version.json') {

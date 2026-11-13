@@ -62,5 +62,5 @@ jobs:
         if: steps.branch_head.outputs.deploy == 'true'
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_NAME" == master ]]; then url=https://mikolaj.walasek.xyz; else url=https://mikolaj-preview.jac3k.workers.dev; fi
+          if [[ "$GITHUB_REF_NAME" == master ]]; then url=https://list.do.mikolaja.pl; else url=https://mikolaj-preview.jac3k.workers.dev; fi
           printf '### Verified deployment\n- Site: %s\n- Commit: `%s`\n- Version: %s/version.json\n' "$url" "$GITHUB_SHA" "$url" >> "$GITHUB_STEP_SUMMARY"
