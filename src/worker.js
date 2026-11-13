@@ -83,6 +83,7 @@ export class FamilyStore extends DurableObject {
     addColumn('members', 'managed_by', 'TEXT');           // osoba bez konta — list prowadzi ten członek
     addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('wishes', 'tier', 'TEXT');
+    addColumn('sessions', 'admin_until', 'INTEGER NOT NULL DEFAULT 0'); // tryb organizatora — per sesja, wygasa sam
     this.sql.exec("UPDATE wishes SET tier = CASE WHEN price IS NULL THEN 'ok' WHEN price < 50 THEN 'small' WHEN price < 200 THEN 'ok' WHEN price <= 300 THEN 'good' ELSE 'angel' END WHERE tier IS NULL");
     this.sql.exec("UPDATE reservations SET snapshot=(SELECT json_object('title',title,'note',note,'url',url,'tier',tier) FROM wishes WHERE wishes.id=reservations.wish_id) WHERE snapshot='{}'");
   }
@@ -96,18 +97,19 @@ export class FamilyStore extends DurableObject {
   async session(member) {
     const token = random();
     this.sql.exec('DELETE FROM sessions WHERE expires < ?', now());
-    this.sql.exec('INSERT INTO sessions VALUES(?,?,?)', await digest(token), member.id, now() + SESSION_AGE);
+    this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + SESSION_AGE);
     return json({ ok: true }, 200, { 'Set-Cookie': cookie(token) });
   }
   async link(member, origin) {
     const token = random();
     this.sql.exec('DELETE FROM links WHERE member_id=? OR expires < ?', member.id, now());
-    this.sql.exec('INSERT INTO links VALUES(?,?,?)', await digest(token), member.id, now() + LINK_AGE);
+    this.sql.exec('INSERT INTO links(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + LINK_AGE);
     return json({ url: `${origin}/#link=${token}` });
   }
 
   // Wszystko, czego potrzebuje aplikacja — przycięte do tego, co ta osoba może wiedzieć.
   state(me) {
+    const god = this.god(me);
     const family = this.one('SELECT name FROM family WHERE id=?', me.family_id);
     const members = this.rows('SELECT id,name,letter,managed_by FROM members WHERE family_id=? ORDER BY name COLLATE NOCASE', me.family_id)
       .map(m => ({ id: m.id, name: m.name, letter: m.letter, managedBy: m.managed_by }));
@@ -118,6 +120,7 @@ export class FamilyStore extends DurableObject {
       // Obdarowany nigdy nie dostaje informacji o rezerwacjach na własnej liście.
       if (w.owner_id === me.id || !w.buyer) return wish;
       wish.taken = w.buyer === me.id ? 'me' : 'other';
+      if (god) wish.buyerId = w.buyer;
       wish.purchased = Boolean(w.purchased);
       if (w.buyer === me.id) {
         const snap = JSON.parse(w.snapshot || '{}');
@@ -126,8 +129,9 @@ export class FamilyStore extends DurableObject {
       }
       return wish;
     });
-    return { user: { id: me.id, name: me.name, email: me.email, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin) }, family, members, wishes };
+    return { user: { id: me.id, name: me.name, email: me.email, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0 }, family, members, wishes };
   }
+  god(me) { return Boolean(me.is_admin) && me.admin_until > now(); }
   // Przegląd organizatora — bez rezerwacji na jego własnej liście.
   admin(me, origin) {
     const members = this.rows('SELECT id,name,email,is_admin,can_add,managed_by FROM members WHERE family_id=? ORDER BY name COLLATE NOCASE', me.family_id)
@@ -200,7 +204,7 @@ export class FamilyStore extends DurableObject {
         if (this.one('SELECT id FROM members WHERE email=?', input.email)) fail(409, 'Nie można utworzyć konta z tym adresem. Spróbuj się zalogować.');
         if (register) {
           if (this.one('SELECT COUNT(*) AS n FROM family').n >= 2000) fail(503, 'Chwilowo nie można zakładać nowych rodzin. Spróbuj później.');
-          this.sql.exec('INSERT INTO family VALUES(?,?,?,?)', family.id, family.name, family.invite, family.invite_hash);
+          this.sql.exec('INSERT INTO family(id,name,invite,invite_hash) VALUES(?,?,?,?)', family.id, family.name, family.invite, family.invite_hash);
         } else {
           if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
           if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', family.id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
@@ -243,7 +247,7 @@ export class FamilyStore extends DurableObject {
     // ---------- z logowaniem ----------
     const token = request.headers.get('Cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || '';
     const sessionHash = /^[a-f0-9]{64}$/.test(token) ? await digest(token) : '';
-    const me = sessionHash ? this.one('SELECT m.* FROM members m JOIN sessions s ON s.member_id=m.id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
+    const me = sessionHash ? this.one('SELECT m.*,s.admin_until FROM members m JOIN sessions s ON s.member_id=m.id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
     if (method === 'GET' && path === '/api/state') return json(me ? this.state(me) : { user: null });
     if (method === 'POST' && path === '/api/logout') {
       this.sql.exec('DELETE FROM sessions WHERE hash=?', sessionHash);
@@ -252,10 +256,17 @@ export class FamilyStore extends DurableObject {
     if (!me) fail(401, 'Zaloguj się, aby zobaczyć rodzinne listy.');
 
     const member = id => this.one('SELECT * FROM members WHERE id=? AND family_id=?', id, me.family_id) || fail(404, 'Nie znaleziono tej osoby.');
-    const canEdit = m => m.id === me.id || m.managed_by === me.id;
+    const god = this.god(me);
+    const canEdit = m => m.id === me.id || m.managed_by === me.id || god;
     const adminOnly = () => { if (!me.is_admin) fail(403, 'To może zrobić tylko organizator rodziny.'); };
 
     if (method === 'GET' && path === '/api/admin') { adminOnly(); return json(this.admin(me, url.origin)); }
+    // Tryb organizatora: włączany ręcznie, tylko w tej sesji, wyłącza się sam po godzinie.
+    if (method === 'PATCH' && path === '/api/session') {
+      adminOnly();
+      this.sql.exec('UPDATE sessions SET admin_until=? WHERE hash=?', body.adminMode === true ? now() + 3600 : 0, sessionHash);
+      return json({ ok: true });
+    }
     if (method === 'POST' && path === '/api/invite') {
       adminOnly();
       const invite = random();
@@ -331,7 +342,7 @@ export class FamilyStore extends DurableObject {
       const w = this.one('SELECT w.*,m.managed_by FROM wishes w JOIN members m ON m.id=w.owner_id WHERE w.id=? AND m.family_id=?', match[1], me.family_id);
       if (!w) fail(404, 'To życzenie nie jest już dostępne.');
       if (!match[2]) {
-        if (w.owner_id !== me.id && w.managed_by !== me.id) fail(403, 'Możesz zmieniać tylko swoją listę.');
+        if (w.owner_id !== me.id && w.managed_by !== me.id && !god) fail(403, 'Możesz zmieniać tylko swoją listę.');
         if (method === 'PATCH') {
           const u = wishFields(body);
           this.sql.exec('UPDATE wishes SET title=?,note=?,url=?,tier=? WHERE id=?', u.title, u.note, u.url, u.tier, w.id);
@@ -348,12 +359,22 @@ export class FamilyStore extends DurableObject {
         if (w.owner_id === me.id) fail(403, 'Nie można rezerwować własnych życzeń.');
         const reservation = this.one('SELECT * FROM reservations WHERE wish_id=?', w.id);
         if (method === 'POST') {
-          if (reservation) fail(409, 'Ktoś już wybrał ten prezent. Wybierz inny.');
-          // Odczyt i INSERT bez await pomiędzy — atomowe w obrębie Durable Object.
-          this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot) VALUES(?,?,0,?)', w.id, me.id, JSON.stringify({ title: w.title, note: w.note, url: w.url, tier: w.tier }));
+          // Organizator w swoim trybie może przypisać prezent komuś innemu (albo przepisać rezerwację).
+          let buyer = me;
+          if (body.buyerId && body.buyerId !== me.id) {
+            if (!god) fail(403, 'Przypisywanie prezentów innym wymaga trybu organizatora.');
+            buyer = member(body.buyerId);
+            if (buyer.managed_by) fail(400, 'Prezenty kupują osoby z własnym kontem.');
+            if (buyer.id === w.owner_id) fail(400, 'Nikt nie kupuje prezentu sam sobie.');
+          }
+          if (reservation && !god) fail(409, 'Ktoś już wybrał ten prezent. Wybierz inny.');
+          const snap = JSON.stringify({ title: w.title, note: w.note, url: w.url, tier: w.tier });
+          // Odczyt i zapis bez await pomiędzy — atomowe w obrębie Durable Object.
+          if (reservation) this.sql.exec('UPDATE reservations SET member_id=?,snapshot=? WHERE wish_id=?', buyer.id, snap, w.id);
+          else this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot) VALUES(?,?,0,?)', w.id, buyer.id, snap);
           return json({ ok: true });
         }
-        if (!reservation || reservation.member_id !== me.id) fail(403, 'Możesz zmieniać tylko swoje rezerwacje.');
+        if (!reservation || (reservation.member_id !== me.id && !god)) fail(403, 'Możesz zmieniać tylko swoje rezerwacje.');
         if (method === 'DELETE') { this.sql.exec('DELETE FROM reservations WHERE wish_id=?', w.id); return json({ ok: true }); }
         if (method === 'PATCH') {
           if (typeof body.purchased !== 'boolean') fail(400, 'Niepoprawny status prezentu.');

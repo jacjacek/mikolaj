@@ -41,6 +41,9 @@ const wishesOf = id => S.data.wishes.filter(w => w.ownerId === id);
 const managedBy = id => S.data.members.filter(m => m.managedBy === id);
 const myRes = () => S.data.wishes.filter(w => w.taken === 'me');
 const status = w => !w.taken ? 'free' : w.taken === 'me' ? 'mine' : 'taken';
+// tryb organizatora: włączany w tej sesji, serwer sam go wyłącza po godzinie
+const god = () => me().isAdmin && me().adminUntil > Date.now() / 1000;
+const accountsBut = id => S.data.members.filter(m => !m.managedBy && m.id !== id);
 const secKey = (kind, owner) => owner === me().id ? `s:${kind}` : `s:${kind}:${owner}`;
 
 /* ===================== API ===================== */
@@ -125,17 +128,17 @@ function demoApi(path, method, body) {
   const fail = msg => { throw new Error(msg); };
   const res = id => D.res.find(r => r.wishId === id);
   const mem = id => D.members.find(m => m.id === id) || fail('Nie znaleziono tej osoby.');
-  const canEdit = m => m.id === me.id || m.managedBy === me.id;
+  const canEdit = m => m.id === me.id || m.managedBy === me.id || D.until > Date.now() / 1000;
   const out = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
   const [a, id, sub] = path.split('/');
   if (path === 'state') return out({
     family: { name: 'Nowakowie' },
-    user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin },
+    user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0 },
     members: D.members.map(({ id, name, letter, managedBy }) => ({ id, name, letter, managedBy })),
     wishes: D.wishes.map(w => {
       const r = res(w.id);
       if (w.ownerId === me.id || !r) return w;
-      return { ...w, taken: r.by === me.id ? 'me' : 'other', purchased: r.purchased, ...(r.by === me.id && r.was !== w.tier ? { prevTier: r.was } : {}) };
+      return { ...w, taken: r.by === me.id ? 'me' : 'other', purchased: r.purchased, ...(D.until > Date.now() / 1000 ? { buyerId: r.by } : {}), ...(r.by === me.id && r.was !== w.tier ? { prevTier: r.was } : {}) };
     }),
   });
   if (path === 'admin') return out({
@@ -144,6 +147,7 @@ function demoApi(path, method, body) {
     reservations: D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
     hidden: D.res.reduce((h, r) => { if (D.wishes.find(w => w.id === r.wishId).ownerId === me.id) h[r.by] = (h[r.by] || 0) + 1; return h; }, {}),
   });
+  if (path === 'session') { D.until = body.adminMode ? Math.floor(Date.now() / 1000) + 3600 : 0; return out({ ok: true }); }
   if (path === 'logout' || path === 'invite') return out({ ok: true });
   if (a === 'wishes') {
     if (!id) {
@@ -156,7 +160,7 @@ function demoApi(path, method, body) {
     const w = D.wishes.find(x => x.id === id) || fail('To życzenie nie jest już dostępne.');
     const r = res(id);
     if (sub === 'reserve') {
-      if (method === 'POST') { if (r) fail('Ktoś już wybrał ten prezent.'); D.res.push({ wishId: id, by: me.id, purchased: false, was: w.tier }); }
+      if (method === 'POST') { const by = body.buyerId || me.id; if (r && !body.buyerId) fail('Ktoś już wybrał ten prezent.'); if (r) r.by = by; else D.res.push({ wishId: id, by, purchased: false, was: w.tier }); }
       if (method === 'DELETE') D.res = D.res.filter(x => x !== r);
       if (method === 'PATCH') r.purchased = body.purchased;
     } else {
@@ -208,11 +212,14 @@ function fold(key, cls, head, body) {
 function vHead() {
   const bar = S.demo ? `<p class="demo-bar">Przykładowa rodzina — zmiany znikną po odświeżeniu. <button data-act="end-demo">Wyjdź z demo</button></p>` : '';
   const tab = (s, label) => `<button data-go="${s}" ${S.screen === s ? 'aria-current="page"' : ''}>${label}</button>`;
-  return `${bar}<header class="head">
+  const until = god() ? new Date(me().adminUntil * 1000).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const mode = god() ? `<p class="demo-bar mode-bar">Tryb organizatora do ${until}: możesz zmieniać listy innych i przypisywać prezenty. <button data-act="admin-mode">Wyłącz</button></p>` : '';
+  return `${bar}${mode}<header class="head">
     <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
     <div class="right">${themeBtn()}<button class="who" data-act="menu" aria-expanded="${S.menu}">${esc(me().name)}</button></div>
   </header>
   <div class="menu ${S.menu ? 'open' : ''}"><div>
+    ${me().isAdmin ? `<button data-act="admin-mode">${god() ? 'Wyłącz tryb organizatora' : 'Tryb organizatora'}</button>` : ''}
     <button data-act="logout">Wyloguj</button>
   </div></div>`;
 }
@@ -223,12 +230,19 @@ function vGift(w) {
   if (st === 'free') row = `<button class="a solid" data-act="reserve" data-id="${w.id}">Kupię to</button>`;
   else if (st === 'mine') row = `<span class="st">${w.purchased ? 'Kupione przez Ciebie' : 'Ty to kupujesz'}</span>
     <button class="a quiet" data-act="${w.purchased ? 'buy' : 'cancel'}" data-id="${w.id}">${w.purchased ? 'cofnij' : 'rezygnuję'}</button>`;
-  else row = `<span class="st">${w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
+  else row = `<span class="st">${w.buyerId ? `${w.purchased ? 'Kupione' : 'Kupuje'}: ${esc(member(w.buyerId)?.name)}` : w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
+  let assign = '';
+  if (god() && S.assign === w.id) assign = `<div class="row">
+      <label class="sr" for="f-buyer">Kto kupuje</label>
+      <select class="in" id="f-buyer"><option value="">Nikt — prezent wolny</option>${accountsBut(w.ownerId).map(a => `<option value="${a.id}" ${a.id === (w.buyerId || (w.taken === 'me' ? me().id : '')) ? 'selected' : ''}>Kupuje: ${esc(a.name)}</option>`).join('')}</select>
+      <button class="a solid" data-act="assign-save" data-id="${w.id}">Zapisz</button><button class="a quiet" data-act="assign" data-id="">Anuluj</button></div>`;
+  else if (god()) row += `<button class="a quiet" data-act="assign" data-id="${w.id}">przypisz</button>`;
   return `<div class="gift ${st === 'free' ? '' : 'taken'}">
     <span class="t">${esc(w.title)}</span>
     ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
     ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
     <div class="row">${row}${range(w)}${w.url ? `<a class="a quiet" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</div>
+    ${assign}
   </div>`;
 }
 
@@ -403,7 +417,9 @@ function vFamily() {
     const meta = m.managedBy ? `bez konta · prowadzi ${name(m.managedBy)}`
       : [esc(m.email), m.isAdmin ? 'organizator' : '', m.canAdd ? 'może dodawać osoby' : ''].filter(Boolean).join(' · ');
     let actions = '';
+    const editBtn = own || !god() ? '' : `<button class="a" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
+        ${editBtn}
         ${own ? '' : `<button class="a" data-act="person-link" data-id="${m.id}">Link do nowego hasła</button>`}
         <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
@@ -412,6 +428,7 @@ function vFamily() {
       ${confirming('make-admin', m.id) ? confirmBox('make-admin', m.id, `${esc(m.name)} zostanie organizatorem. Ty stracisz dostęp do tej zakładki.`, 'Przekaż') : ''}
       ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `${esc(m.name)} straci dostęp. Znikną list, życzenia i rezerwacje tej osoby.${A.members.some(x => x.managedBy === m.id) ? ' Osoby, które prowadzi, przejdą do Ciebie.' : ''}`, 'Usuń') : ''}`;
     if (open && m.managedBy) actions = `<div class="fam-actions">
+        ${editBtn}
         <label class="sr" for="f-manager">Opiekun</label>
         <select class="in" id="f-manager">${accounts.map(a => `<option value="${a.id}" ${a.id === m.managedBy ? 'selected' : ''}>Prowadzi: ${esc(a.name)}</option>`).join('')}</select>
         <button class="a" data-act="save-manager" data-id="${m.id}">Zmień opiekuna</button>
@@ -427,40 +444,47 @@ function vFamily() {
       </button>${actions}</div>`;
   };
   const tok = A.invite.split('=').pop();
+  const who = `<h2 class="label">Kto co kupuje</h2>
+    <div class="filter">
+      <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
+      <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
+    </div>
+    ${resHtml}`;
+  const invite = `<h2 class="label">Zaproszenie</h2>
+    <p class="fam-text">Każdy, kto ma ten link, może dołączyć do rodziny. Wysyłaj go prywatnie — SMS-em albo w komunikatorze.</p>
+    <p class="linkline">…/#invite=${esc(tok.slice(0, 4))}…${esc(tok.slice(-3))}</p>
+    <div class="actions">
+      <button class="a solid" data-act="copy-invite">Skopiuj link</button>
+      <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
+    </div>
+    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}`;
+  const addPeople = `<h2 class="label">Dodaj osoby</h2>
+    <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz dać im własne konto linkiem albo zmienić opiekuna.</p>
+    <div class="form"><label class="sr" for="f-people">Imiona</label>
+      <textarea class="in" id="f-people" placeholder="${'Babcia Hela&#10;Dziadek Jurek&#10;Zosia'}"></textarea>
+      <div class="actions"><button class="a solid" data-act="add-people">Dodaj osoby</button></div></div>`;
+  const mode = `<h2 class="label">Tryb organizatora</h2>
+    <p class="fam-text">Na wszelki wypadek: zmieniasz listy i życzenia innych osób i przypisujesz za nich prezenty. Włącza się tylko w tej sesji i wyłącza sam po godzinie. Twojej listy nadal nie widzisz.</p>
+    <div class="actions mt">${god() ? '<button class="a" data-act="admin-mode">Wyłącz tryb organizatora</button>' : '<button class="a solid" data-act="admin-mode">Włącz na godzinę</button>'}</div>`;
   return `${vHead()}<section class="fade">
     <h1 class="title">Rodzina</h1>
     <p class="sub">Tę zakładkę widzisz tylko Ty, bo jesteś organizatorem.</p>
-    ${A.reservations.length ? `    <h2 class="label">Kto co kupuje</h2>
-    <div class="filter">
-      <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
-      <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
-    </div>
-    ${resHtml}
-    <h2 class="label">Zaproszenie</h2>
-    <p class="fam-text">Każdy, kto ma ten link, może dołączyć do rodziny. Wysyłaj go prywatnie — SMS-em albo w komunikatorze.</p>
-    <p class="linkline">…/#invite=${esc(tok.slice(0, 4))}…${esc(tok.slice(-3))}</p>
-    <div class="actions">
-      <button class="a solid" data-act="copy-invite">Skopiuj link</button>
-      <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
-    </div>
-    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
-` : `    <h2 class="label">Zaproszenie</h2>
-    <p class="fam-text">Każdy, kto ma ten link, może dołączyć do rodziny. Wysyłaj go prywatnie — SMS-em albo w komunikatorze.</p>
-    <p class="linkline">…/#invite=${esc(tok.slice(0, 4))}…${esc(tok.slice(-3))}</p>
-    <div class="actions">
-      <button class="a solid" data-act="copy-invite">Skopiuj link</button>
-      <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
-    </div>
-    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
-    <h2 class="label">Kto co kupuje</h2>
-    <div class="filter">
-      <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
-      <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
-    </div>
-    ${resHtml}
-`}
+    ${A.reservations.length ? who + invite + addPeople : invite + addPeople + who}
     <h2 class="label">Osoby · ${A.members.length}</h2>
     ${people.map(row).join('')}
+    ${mode}
+  </section>`;
+}
+
+// organizator w swoim trybie edytuje listę innej osoby
+function vEdit() {
+  const m = member(S.editOwner);
+  if (!m || !god()) { S.screen = 'family'; return vFamily(); }
+  return `${vHead()}<section class="fade">
+    <div class="actions"><button class="a quiet" data-go="family">← Rodzina</button></div>
+    <h1 class="title mt">${esc(m.name)}</h1>
+    <p class="sub">Zmieniasz jako organizator. ${esc(m.name)} zobaczy zmiany na swojej liście.</p>
+    ${ownerBlocks(m.id)}
   </section>`;
 }
 
@@ -541,22 +565,28 @@ function vLanding() {
 }
 
 /* ===================== RENDER ===================== */
+let modeTimer;
+function scheduleModeEnd() {
+  clearTimeout(modeTimer);
+  if (S.data?.user && god()) modeTimer = setTimeout(() => act(async () => {}, 'Tryb organizatora wyłączył się'), me().adminUntil * 1000 - Date.now() + 500);
+}
 const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
 const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz' };
 function render(animate = false) {
   const y = window.scrollY;
   const loggedIn = S.data?.user;
-  if (loggedIn && !TABS[S.screen]) S.screen = 'lists';
+  if (loggedIn && !TABS[S.screen] && S.screen !== 'edit') S.screen = 'lists';
   if (!loggedIn && !['login', 'register', 'join', 'link'].includes(S.screen)) S.screen = 'landing';
-  if (S.screen === 'family' && !me()?.isAdmin) S.screen = 'lists';
-  const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily }[S.screen]();
+  if ((S.screen === 'family' || S.screen === 'edit') && !me()?.isAdmin) S.screen = 'lists';
+  scheduleModeEnd();
+  const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
   $('#app').innerHTML = view;
   if (!animate) { $('.fade')?.classList.remove('fade'); window.scrollTo(0, y); }
   markFits();
   syncAll();
 }
 function go(screen) {
-  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null });
+  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null });
   const hash = (S.data?.user ? TABS : PUBLIC)[screen];
   if (hash) history.replaceState(null, '', hash);
   window.scrollTo(0, 0);
@@ -690,6 +720,20 @@ document.addEventListener('click', e => {
 
     // organizator
     case 'fam-view': S.famView = d.v; return render();
+    case 'admin-mode': {
+      const on = !god();
+      return act(async () => { await api('session', 'PATCH', { adminMode: on }); S.menu = false; S.assign = null; if (!on && S.screen === 'edit') S.screen = 'family'; },
+        on ? 'Tryb organizatora włączony na godzinę' : 'Tryb organizatora wyłączony'); }
+    case 'assign': S.assign = id || null; return render();
+    case 'assign-save': {
+      const buyerId = $('#f-buyer').value;
+      return act(async () => { await (buyerId ? api(`wishes/${id}/reserve`, 'POST', { buyerId }) : api(`wishes/${id}/reserve`, 'DELETE')); S.assign = null; }, buyerId ? 'Przypisano' : 'Prezent znów jest wolny'); }
+    case 'edit-person': S.editOwner = id; go('edit'); return;
+    case 'add-people': {
+      const names = [...new Set($('#f-people').value.split('\n').map(n => n.trim()).filter(Boolean))].slice(0, 30);
+      if (!names.length) return $('#f-people').focus();
+      return act(async () => { for (const name of names) await api('members', 'POST', { name: name.slice(0, 60) }); },
+        `Dodano: ${names.length} ${pl(names.length, 'osoba', 'osoby', 'osób')}. Prowadzisz je w zakładce Moje.`); }
     case 'fam': S.fam = S.fam === id ? null : id; S.confirm = null; return render();
     case 'copy-invite': return copy(S.admin.invite, 'Link skopiowany');
     case 'new-invite':
