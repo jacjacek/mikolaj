@@ -41,7 +41,7 @@ const email = value => {
   return e;
 };
 const password = value => {
-  if (typeof value !== 'string' || value.length < 10 || value.length > 256) fail(400, 'Hasło musi mieć od 10 do 256 znaków.');
+  if (typeof value !== 'string' || value.length < 4 || value.length > 256) fail(400, 'Hasło musi mieć co najmniej 4 znaki.');
   return value;
 };
 function wishFields(body) {
