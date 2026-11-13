@@ -17,7 +17,7 @@ const TIERS = [
 const tier = id => TIERS.find(t => t.id === id) || TIERS[1];
 const tierIx = w => TIERS.findIndex(t => t.id === w.tier);
 const byTier = (list, render) => list.slice().sort((a, b) => tierIx(a) - tierIx(b)).map(render).join('');
-const range = w => `<span class="st">${tier(w.tier).range}</span>`;
+const range = w => `<span class="st rng">${tier(w.tier).range}</span>`;
 
 /* ===================== STAN ===================== */
 const S = {
@@ -144,7 +144,8 @@ function demoApi(path, method, body) {
   if (path === 'admin') return out({
     invite: `${location.origin}/#invite=${D.invite}`,
     members: D.members,
-    reservations: D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
+    locked: !(D.until > Date.now() / 1000),
+    reservations: !(D.until > Date.now() / 1000) ? [] : D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
     hidden: D.res.reduce((h, r) => { if (D.wishes.find(w => w.id === r.wishId).ownerId === me.id) h[r.by] = (h[r.by] || 0) + 1; return h; }, {}),
   });
   if (path === 'session') { D.until = body.adminMode ? Math.floor(Date.now() / 1000) + 3600 : 0; return out({ ok: true }); }
@@ -213,7 +214,7 @@ function vHead() {
   const bar = S.demo ? `<p class="demo-bar">Przykładowa rodzina — zmiany znikną po odświeżeniu. <button data-act="end-demo">Wyjdź z demo</button></p>` : '';
   const tab = (s, label) => `<button data-go="${s}" ${S.screen === s ? 'aria-current="page"' : ''}>${label}</button>`;
   const until = god() ? new Date(me().adminUntil * 1000).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '';
-  const mode = god() ? `<p class="demo-bar mode-bar">Tryb organizatora do ${until}: możesz zmieniać listy innych i przypisywać prezenty. <button data-act="admin-mode">Wyłącz</button></p>` : '';
+  const mode = god() ? `<p class="demo-bar mode-bar">Tryb organizatora do ${until}: widzisz, kto co kupuje, i możesz zmieniać listy innych. <button data-act="admin-mode">Wyłącz</button></p>` : '';
   return `${bar}${mode}<header class="head">
     <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
     <div class="right">${themeBtn()}<button class="who" data-act="menu" aria-expanded="${S.menu}">${esc(me().name)}</button></div>
@@ -241,7 +242,7 @@ function vGift(w) {
     <span class="t">${esc(w.title)}</span>
     ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
     ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
-    <div class="row">${row}${range(w)}${w.url ? `<a class="a quiet" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</div>
+    <div class="row"><span class="act">${row}</span><span class="meta">${range(w)}${w.url ? `<a class="a quiet lnk" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</span></div>
     ${assign}
   </div>`;
 }
@@ -323,7 +324,7 @@ function ownerBlocks(ownerId) {
     ${byTier(ws, w => S.editWish === w.id ? wishForm(w, false) : `<div class="gift">
       <span class="t">${esc(w.title)}</span>
       ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
-      <div class="row"><button class="a" data-edit="${w.id}">Zmień</button>${stLine(w)}${range(w)}${w.url ? `<span class="st">${esc(host(w.url))}</span>` : ''}</div>
+      <div class="row"><span class="act"><button class="a" data-edit="${w.id}">Zmień</button>${stLine(w)}</span><span class="meta">${range(w)}${w.url ? `<span class="st lnk">${esc(host(w.url))}</span>` : ''}</span></div>
     </div>`)}
     ${S.adding === ownerId ? wishForm({ title: '', note: '', url: '', tier: '', ownerId }, true)
       : `<div class="actions mt"><button class="a solid" data-act="add" data-owner="${ownerId}">${ws.length ? 'Dodaj życzenie' : 'Dodaj pierwsze życzenie'}</button></div>`}`;
@@ -351,14 +352,16 @@ function vMine() {
 
   const managedHtml = managed.map(m => `
     <div class="managed">
-      <h2 class="managed-name">${esc(m.name)}</h2>
-      <p class="sub">Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.</p>
-      ${ownerBlocks(m.id)}
-      <div class="actions managed-actions">
-        <button class="a quiet" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
-        <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
+      <div class="managed-head">
+        <h2 class="managed-name">${esc(m.name)}</h2>
+        <p class="sub">Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.</p>
+        <div class="actions managed-actions">
+          <button class="a quiet" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
+          <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
+        </div>
+        ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}
       </div>
-      ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}
+      <div class="managed-body">${ownerBlocks(m.id)}</div>
     </div>`).join('');
 
   const addPerson = !me().canAdd ? '' : S.addingPerson
@@ -375,10 +378,11 @@ function vMine() {
   return `${vHead()}<section class="fade">
     <h1 class="title">${esc(me().name)}</h1>
     <p class="sub">To, co kupujesz innym, Twój list i życzenia${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
-    ${res.length ? buying : ''}
-    ${ownerBlocks(me().id)}
+    <div class="split ${res.length ? '' : 'later'}">
+      <aside class="split-side">${buying}</aside>
+      <div class="split-main">${ownerBlocks(me().id)}</div>
+    </div>
     ${managedHtml}
-    ${res.length ? '' : buying}
     ${addPerson}
   </section>`;
 }
@@ -444,7 +448,9 @@ function vFamily() {
       </button>${actions}</div>`;
   };
   const tok = A.invite.split('=').pop();
-  const who = `<h2 class="label">Kto co kupuje</h2>
+  const who = A.locked ? `<h2 class="label">Kto co kupuje</h2>
+    <p class="fam-text">Widać to tylko w trybie organizatora — żeby nikt przypadkiem nie zobaczył cudzych niespodzianek.</p>
+    <div class="actions mt"><button class="a" data-act="admin-mode">Włącz tryb organizatora</button></div>` : `<h2 class="label">Kto co kupuje</h2>
     <div class="filter">
       <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
       <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
@@ -464,15 +470,17 @@ function vFamily() {
       <textarea class="in" id="f-people" placeholder="${'Babcia Hela&#10;Dziadek Jurek&#10;Zosia'}"></textarea>
       <div class="actions"><button class="a solid" data-act="add-people">Dodaj osoby</button></div></div>`;
   const mode = `<h2 class="label">Tryb organizatora</h2>
-    <p class="fam-text">Na wszelki wypadek: zmieniasz listy i życzenia innych osób i przypisujesz za nich prezenty. Włącza się tylko w tej sesji i wyłącza sam po godzinie. Twojej listy nadal nie widzisz.</p>
+    <p class="fam-text">Na wszelki wypadek: widzisz, kto co kupuje, zmieniasz listy i życzenia innych osób i przypisujesz za nich prezenty. Włącza się tylko w tej sesji i wyłącza sam po godzinie. Twojej listy nadal nie widzisz.</p>
     <div class="actions mt">${god() ? '<button class="a" data-act="admin-mode">Wyłącz tryb organizatora</button>' : '<button class="a solid" data-act="admin-mode">Włącz na godzinę</button>'}</div>`;
   return `${vHead()}<section class="fade">
     <h1 class="title">Rodzina</h1>
     <p class="sub">Tę zakładkę widzisz tylko Ty, bo jesteś organizatorem.</p>
-    ${A.reservations.length ? who + invite + addPeople : invite + addPeople + who}
-    <h2 class="label">Osoby · ${A.members.length}</h2>
-    ${people.map(row).join('')}
-    ${mode}
+    <div class="split fam-split ${A.reservations.length ? '' : 'fresh'}">
+      <div class="split-main">${who}
+        <h2 class="label">Osoby · ${A.members.length}</h2>
+        ${people.map(row).join('')}</div>
+      <aside class="split-side">${invite}${addPeople}${mode}</aside>
+    </div>
   </section>`;
 }
 
@@ -545,22 +553,28 @@ function vLanding() {
     <div class="right">${themeBtn()}<button class="a" data-go="login">Zaloguj się</button></div>
   </header>
   <section class="landing fade">
+    <div class="hero-grid"><div>
     <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
     <p class="lead">Każdy pisze, czego by chciał. Bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego — a niespodzianka zostaje niespodzianką.</p>
     <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
     <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-act="demo">Zobacz przykład</button></div>
-    <p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p>
+    </div><p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p></div>
     <h2 class="label">Jak to działa</h2>
+    <div class="points">
     ${point('Każdy pisze list', 'Kilka zdań do Mikołaja i lista życzeń.')}
     ${point('Bliscy wybierają prezent', 'Kto chce, rezerwuje kupienie komuś prezentu.')}
     ${point('Niespodzianka zostaje niespodzianką', 'Nie widzisz, co inni kupują — tylko swoje.')}
     ${point('Także za dziadków i dzieci', 'Bez wykluczania — da się wpisać list za kogoś.')}
+    </div>
+    <div class="start-grid"><div>
     <h2 class="label">Jak zacząć</h2>
     <p class="fam-text">Załóż rodzinę — zostajesz jej organizatorem. Potem wyślij bliskim link zaproszenia, a dziadków czy dzieci dodaj sam. Każda rodzina widzi tylko swoje listy.</p>
     <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-go="login">Mam już konto</button></div>
+    </div><div>
     <h2 class="label">Wypróbuj</h2>
     <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
     <div class="actions mt"><button class="a" data-act="demo">Otwórz przykładową rodzinę</button></div>
+    </div></div>
   </section>`;
 }
 
@@ -606,9 +620,10 @@ function syncAll() {
   b.textContent = keys.length && keys.every(k => S.open.has(k)) ? 'Zwiń wszystkie' : 'Rozwiń wszystkie';
 }
 // płynne rozwijanie i zwijanie bez przerysowania
+const wide = () => matchMedia('(min-width: 1100px)').matches;
 function toggleFold(key, bulk = false) {
   const f = document.querySelector(`[data-fold="${key}"]`);
-  if (!f || f.classList.contains('fits')) return;
+  if (!f || f.classList.contains('fits') || wide()) return;
   const peek = f.querySelector('.peek');
   const open = !S.open.has(key);
   open ? S.open.add(key) : S.open.delete(key);

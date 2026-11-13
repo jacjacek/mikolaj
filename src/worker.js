@@ -136,13 +136,14 @@ export class FamilyStore extends DurableObject {
   admin(me, origin) {
     const members = this.rows('SELECT id,name,email,is_admin,can_add,managed_by FROM members WHERE family_id=? ORDER BY name COLLATE NOCASE', me.family_id)
       .map(m => ({ id: m.id, name: m.name, email: m.managed_by ? null : m.email, isAdmin: Boolean(m.is_admin), canAdd: Boolean(m.can_add), managedBy: m.managed_by }));
-    const all = this.rows(`SELECT w.id AS wishId,w.title,w.tier,w.owner_id AS ownerId,r.member_id AS buyerId,r.purchased
+    // Kto co kupuje — tylko w tymczasowym trybie organizatora.
+    const all = !this.god(me) ? [] : this.rows(`SELECT w.id AS wishId,w.title,w.tier,w.owner_id AS ownerId,r.member_id AS buyerId,r.purchased
       FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id WHERE m.family_id=? ORDER BY w.created_at`, me.family_id);
     const hidden = {};
     for (const r of all) if (r.ownerId === me.id) hidden[r.buyerId] = (hidden[r.buyerId] || 0) + 1;
     const reservations = all.filter(r => r.ownerId !== me.id).map(r => ({ ...r, purchased: Boolean(r.purchased) }));
     const invite = this.one('SELECT invite FROM family WHERE id=?', me.family_id).invite;
-    return { invite: `${origin}/#invite=${invite}`, members, reservations, hidden };
+    return { invite: `${origin}/#invite=${invite}`, members, reservations, hidden, locked: !this.god(me) };
   }
 
   async fetch(request) {
