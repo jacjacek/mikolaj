@@ -12,6 +12,7 @@ import os
 import re
 from pathlib import Path
 import secrets
+import time
 import urllib.error
 import urllib.request
 
@@ -145,7 +146,12 @@ def main():
         parts.append(('public/' + file, 'text/plain', (ROOT / 'public' / file).read_bytes()))
     payload, content_type = multipart(parts)
     deployed = api(prefix + f'/scripts/{name}', 'PUT', raw=payload, content_type=content_type)
-    settings = api(prefix + f'/scripts/{name}/settings')
+    # Ustawienia bywają przez chwilę nieaktualne tuż po wgraniu — odczytaj ponownie.
+    for _ in range(10):
+        settings = api(prefix + f'/scripts/{name}/settings')
+        if not args.revision or any(b['name'] == 'DEPLOY_REVISION' and b.get('text') == args.revision for b in settings.get('bindings', [])):
+            break
+        time.sleep(3)
     if not any(binding['name'] == 'FAMILY' for binding in settings.get('bindings', [])):
         raise RuntimeError('Read-back failed: missing FAMILY binding')
     current_family = next(binding for binding in settings['bindings'] if binding['name'] == 'FAMILY')
