@@ -1,6 +1,6 @@
 # Mikołaj
 
-Prywatne, rodzinne listy do Świętego Mikołaja: każdy pisze list i dodaje życzenia, bliscy rezerwują prezenty tak, żeby się nie dublować. Obdarowany nigdy nie widzi rezerwacji na swojej liście — także w odpowiedzi API.
+Prywatne, rodzinne listy do Świętego Mikołaja. Każdy może założyć własną rodzinę (zostaje jej organizatorem) i zaprosić bliskich linkiem; rodziny są od siebie oddzielone. W rodzinie: każdy pisze list i dodaje życzenia, bliscy rezerwują prezenty tak, żeby się nie dublować. Obdarowany nigdy nie widzi rezerwacji na swojej liście — także w odpowiedzi API.
 
 ## Jak działa
 
@@ -21,4 +21,4 @@ Hasła: PBKDF2-SHA256 (100 000 iteracji). Sesje: losowy token, w bazie tylko has
 
 Push do `master` → https://mikolaj.walasek.xyz, push do `develop` → https://mikolaj-preview.jac3k.workers.dev (osobne dane). Workflow `.github/workflows/deploy.yml` sprawdza składnię, wgrywa źródła i weryfikuje wdrożenie. Wersja: `/version.json`.
 
-Pierwsze utworzenie rodziny wymaga prywatnego linku `#setup=…` (patrz `scripts/deploy.py`). **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.
+Aplikacja nie wysyła maili — zapomniane hasło resetuje organizator jednorazowym linkiem. **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.

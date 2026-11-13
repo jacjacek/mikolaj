@@ -129,6 +129,7 @@ function demoApi(path, method, body) {
   const out = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
   const [a, id, sub] = path.split('/');
   if (path === 'state') return out({
+    family: { name: 'Nowakowie' },
     user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin },
     members: D.members.map(({ id, name, letter, managedBy }) => ({ id, name, letter, managedBy })),
     wishes: D.wishes.map(w => {
@@ -240,7 +241,7 @@ function vLists() {
   return `${vHead()}<section class="fade">
     <div class="title-row"><h1 class="title">Listy</h1>
       ${others.length ? `<button class="a" data-act="toggle-all">Rozwiń wszystkie</button>` : ''}</div>
-    <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
+    <p class="sub">${S.data.family?.name ? esc(S.data.family.name) + ' · ' : ''}${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
     ${missing ? `<p class="nudge">Nie masz jeszcze ${missing}. <button data-go="mine">${missing === 'listu' ? 'Napisz' : 'Dodaj'}</button></p>` : ''}
     <div class="people">
     ${others.length ? others.map(p => {
@@ -262,7 +263,8 @@ function vLists() {
         ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
         ${p.managedBy === me().id ? `<div class="actions mt"><button class="a" data-go="mine">Zmień list i życzenia</button></div>` : ''}`;
       return fold('p:' + p.id, 'person', head, body);
-    }).join('') : '<p class="empty">Nikogo tu jeszcze nie ma. Organizator może wysłać zaproszenie.</p>'}
+    }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
+      ${me().isAdmin ? '<div class="actions mt"><button class="a solid" data-go="family">Zaproś bliskich</button></div>' : ''}`}
     </div>
   </section>`;
 }
@@ -428,7 +430,7 @@ function vFamily() {
   return `${vHead()}<section class="fade">
     <h1 class="title">Rodzina</h1>
     <p class="sub">Tę zakładkę widzisz tylko Ty, bo jesteś organizatorem.</p>
-    <h2 class="label">Kto co kupuje</h2>
+    ${A.reservations.length ? `    <h2 class="label">Kto co kupuje</h2>
     <div class="filter">
       <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
       <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
@@ -442,18 +444,46 @@ function vFamily() {
       <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
     </div>
     ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
+` : `    <h2 class="label">Zaproszenie</h2>
+    <p class="fam-text">Każdy, kto ma ten link, może dołączyć do rodziny. Wysyłaj go prywatnie — SMS-em albo w komunikatorze.</p>
+    <p class="linkline">…/#invite=${esc(tok.slice(0, 4))}…${esc(tok.slice(-3))}</p>
+    <div class="actions">
+      <button class="a solid" data-act="copy-invite">Skopiuj link</button>
+      <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
+    </div>
+    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
+    <h2 class="label">Kto co kupuje</h2>
+    <div class="filter">
+      <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
+      <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
+    </div>
+    ${resHtml}
+`}
     <h2 class="label">Osoby · ${A.members.length}</h2>
     ${people.map(row).join('')}
   </section>`;
 }
 
+const PUB = () => `<header class="head pub"><button class="mark" data-go="landing">Mikołaj</button>${themeBtn()}</header>`;
 function vAuth() {
   const I = S.info || {};
-  if (S.screen === 'join') return `<section class="auth fade">
-    <h1 class="title">${I.setup ? 'Nowa rodzina' : 'Zaproszenie'}</h1>
-    <p class="sub">${I.setup ? 'Załóż rodzinę i swoje konto organizatora.' : `${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodzinnych list do Mikołaja.`}</p>
+  const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
+      <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 10 znaków" minlength="10" required autocomplete="new-password">`;
+  if (S.screen === 'register') return `${PUB()}<section class="auth fade">
+    <h1 class="title">Załóż rodzinę</h1>
+    <p class="sub">Zostajesz organizatorem: zapraszasz bliskich linkiem i możesz dodać osoby bez telefonu.</p>
+    <form class="form" data-form="register">
+      <input class="in" name="familyName" placeholder="Nazwa rodziny, np. Kowalscy" maxlength="80" required>
+      ${account}
+      <div class="actions"><button class="a solid">Załóż rodzinę</button></div>
+    </form>
+    <p class="foot">Masz już konto? <button class="a" data-go="login">Zaloguj się</button></p>
+  </section>`;
+  if (S.screen === 'join') return `${PUB()}<section class="auth fade">
+    <h1 class="title">Zaproszenie</h1>
+    <p class="sub">${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodziny ${esc(I.familyName)} — do wspólnych list do Mikołaja.</p>
     <form class="form" data-form="join">
-      ${I.setup ? '<input class="in" name="familyName" placeholder="Nazwa rodziny" maxlength="80" required>' : ''}
       <input class="in" name="name" placeholder="Imię" maxlength="60" required autocomplete="given-name">
       <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
       <input class="in" name="password" type="password" placeholder="Hasło, min. 10 znaków" minlength="10" required autocomplete="new-password">
@@ -470,8 +500,7 @@ function vAuth() {
     </form>
   </section>`;
   if (S.screen !== 'login') return vLanding();
-  return `<header class="head pub"><button class="mark" data-go="landing">Mikołaj</button>${themeBtn()}</header>
-  <section class="auth fade">
+  return `${PUB()}<section class="auth fade">
     <h1 class="title">Zaloguj się</h1>
     <p class="sub">Do rodzinnych list do Mikołaja.</p>
     <form class="form" data-form="login">
@@ -479,7 +508,7 @@ function vAuth() {
       <input class="in" name="password" type="password" placeholder="Hasło" required autocomplete="current-password">
       <div class="actions"><button class="a solid">Zaloguj się</button></div>
     </form>
-    <p class="foot">Konto zakłada się z linku zaproszenia. Zapomniane hasło? Poproś organizatora o nowy link.</p>
+    <p class="foot">Nie masz konta? <button class="a" data-go="register">Załóż rodzinę</button> albo poproś bliskich o link zaproszenia. Zapomniane hasło? Organizator rodziny wyśle Ci nowy link.</p>
   </section>`;
 }
 
@@ -495,15 +524,16 @@ function vLanding() {
     <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
     <p class="lead">Każdy pisze, czego by chciał. Bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego — a niespodzianka zostaje niespodzianką.</p>
     <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
+    <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-act="demo">Zobacz przykład</button></div>
     <p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p>
     <h2 class="label">Jak to działa</h2>
     ${point('Każdy pisze list', 'Kilka zdań do Mikołaja i lista życzeń.')}
     ${point('Bliscy wybierają prezent', 'Kto chce, rezerwuje kupienie komuś prezentu.')}
     ${point('Niespodzianka zostaje niespodzianką', 'Nie widzisz, co inni kupują — tylko swoje.')}
     ${point('Także za dziadków i dzieci', 'Bez wykluczania — da się wpisać list za kogoś.')}
-    <h2 class="label">Dla kogo</h2>
-    <p class="fam-text">Aplikacja jest prywatna, dla jednej rodziny. Konto zakłada się z linku zaproszenia od organizatora.</p>
-    <div class="actions mt"><button class="a solid" data-go="login">Zaloguj się</button></div>
+    <h2 class="label">Jak zacząć</h2>
+    <p class="fam-text">Załóż rodzinę — zostajesz jej organizatorem. Potem wyślij bliskim link zaproszenia, a dziadków czy dzieci dodaj sam. Każda rodzina widzi tylko swoje listy.</p>
+    <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-go="login">Mam już konto</button></div>
     <h2 class="label">Wypróbuj</h2>
     <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
     <div class="actions mt"><button class="a" data-act="demo">Otwórz przykładową rodzinę</button></div>
@@ -512,12 +542,12 @@ function vLanding() {
 
 /* ===================== RENDER ===================== */
 const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
-const PUBLIC = { landing: '#/', login: '#/zaloguj' };
+const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz' };
 function render(animate = false) {
   const y = window.scrollY;
   const loggedIn = S.data?.user;
   if (loggedIn && !TABS[S.screen]) S.screen = 'lists';
-  if (!loggedIn && !['login', 'join', 'link'].includes(S.screen)) S.screen = 'landing';
+  if (!loggedIn && !['login', 'register', 'join', 'link'].includes(S.screen)) S.screen = 'landing';
   if (S.screen === 'family' && !me()?.isAdmin) S.screen = 'lists';
   const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily }[S.screen]();
   $('#app').innerHTML = view;
@@ -682,12 +712,13 @@ document.addEventListener('submit', e => {
   const kind = form.dataset.form;
   act(async () => {
     if (kind === 'login') await api('login', 'POST', body);
-    if (kind === 'join') await api(S.info.setup ? 'create' : 'join', 'POST', { ...body, [S.info.setup ? 'setupToken' : 'inviteToken']: S.token });
+    if (kind === 'register') await api('register', 'POST', body);
+    if (kind === 'join') await api('join', 'POST', { ...body, inviteToken: S.token });
     if (kind === 'link') await api(`link/${S.token}`, 'POST', body);
     S.token = null; S.info = null;
-    S.screen = kind === 'join' ? 'mine' : 'lists';
+    S.screen = { join: 'mine', register: 'family' }[kind] || 'lists';
     history.replaceState(null, '', TABS[S.screen]);
-  });
+  }, kind === 'register' ? 'Rodzina założona. Skopiuj link zaproszenia i wyślij go bliskim.' : null);
 });
 
 document.addEventListener('keydown', e => {
@@ -703,18 +734,17 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
 async function start() {
   setTheme(theme);
   const hash = location.hash;
-  const token = hash.match(/^#(invite|setup|link)=([a-f0-9]{64})$/);
+  const token = hash.match(/^#(invite|link)=([a-f0-9]{64})$/);
   if (token) {
     // Sekret tylko w pamięci — usuń go z paska adresu.
     history.replaceState(null, '', '#/');
     S.token = token[2];
     try {
       if (token[1] === 'invite') { S.info = await api(`invitation/${S.token}`); S.screen = 'join'; }
-      if (token[1] === 'setup') { S.info = { setup: true }; S.screen = 'join'; }
       if (token[1] === 'link') { S.info = await api(`link/${S.token}`); S.screen = 'link'; }
     } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message), 0); }
   } else {
-    S.screen = hash === PUBLIC.login ? 'login' : Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
+    S.screen = Object.keys(PUBLIC).find(k => k !== 'landing' && PUBLIC[k] === hash) || Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
   }
   try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message); }
   // Zalogowany, ale otwiera link? Najpierw link — po zapisaniu wraca do aplikacji.

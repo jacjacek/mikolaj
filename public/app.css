@@ -159,6 +159,8 @@ select.in:invalid { color: var(--faint); }
 .landing { padding: 88px 0 48px; }
 .landing .label { margin: 96px 0 20px; }
 .landing .actions.mt { margin-top: 20px; }
+.landing .cta { margin-top: 36px; gap: 10px 24px; }
+.foot .a { font-size: inherit; padding: 0; }
 .hero { font: 400 48px/1.04 var(--serif); letter-spacing: -.025em; margin: 0 0 28px; max-width: 10em; }
 .lead { font-size: 17px; line-height: 1.6; color: var(--soft); margin: 0 0 20px; max-width: 28em; }
 .sample { font: italic 400 19px/1.65 var(--serif); color: var(--soft); margin: 72px 0 0; max-width: 26em; }

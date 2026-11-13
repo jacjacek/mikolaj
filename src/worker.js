@@ -179,15 +179,16 @@ export class FamilyStore extends DurableObject {
       if (!member || !constantEqual(computed, member.password_hash)) fail(401, 'Nieprawidłowy e-mail lub hasło.');
       return this.session(member);
     }
-    if (method === 'POST' && (path === '/api/create' || path === '/api/join')) {
+    // Rejestracja: każdy może założyć własną rodzinę i zostaje jej organizatorem.
+    if (method === 'POST' && (path === '/api/register' || path === '/api/join')) {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
       const input = { name: text(body.name, 'Imię', 60, true), email: email(body.email), password: password(body.password) };
+      const register = path === '/api/register';
       let family;
-      if (path === '/api/create') {
-        if (!this.env.SETUP_TOKEN || typeof body.setupToken !== 'string' || !constantEqual(await digest(body.setupToken), await digest(this.env.SETUP_TOKEN))) fail(403, 'Utworzenie rodziny wymaga prywatnego linku startowego.');
-        if (this.one('SELECT id FROM family LIMIT 1')) fail(409, 'Rodzina jest już utworzona. Zaloguj się lub poproś o zaproszenie.');
+      if (register) {
+        this.rateLimit(`register:${ipKey}`, 5, 3600);
         const invite = random();
-        family = { id: crypto.randomUUID(), name: text(body.familyName || 'Rodzina', 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
+        family = { id: crypto.randomUUID(), name: text(body.familyName, 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
       } else {
         if (typeof body.inviteToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.inviteToken)) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
         family = this.one('SELECT * FROM family WHERE invite_hash=?', await digest(body.inviteToken));
@@ -197,20 +198,22 @@ export class FamilyStore extends DurableObject {
       // Ponowne sprawdzenie po asynchronicznym KDF, w transakcji.
       this.ctx.storage.transactionSync(() => {
         if (this.one('SELECT id FROM members WHERE email=?', input.email)) fail(409, 'Nie można utworzyć konta z tym adresem. Spróbuj się zalogować.');
-        if (this.one('SELECT COUNT(*) AS n FROM members').n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
-        if (path === '/api/create') {
-          if (this.one('SELECT id FROM family LIMIT 1')) fail(409, 'Rodzina jest już utworzona.');
+        if (register) {
+          if (this.one('SELECT COUNT(*) AS n FROM family').n >= 2000) fail(503, 'Chwilowo nie można zakładać nowych rodzin. Spróbuj później.');
           this.sql.exec('INSERT INTO family VALUES(?,?,?,?)', family.id, family.name, family.invite, family.invite_hash);
-        } else if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
-        this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,is_admin,can_add) VALUES(?,?,?,?,?,?,?,?)', id, family.id, input.name, input.email, salt, hash, path === '/api/create' ? 1 : 0, path === '/api/create' ? 1 : 0);
+        } else {
+          if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
+          if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', family.id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
+        }
+        this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,is_admin,can_add) VALUES(?,?,?,?,?,?,?,?)', id, family.id, input.name, input.email, salt, hash, register ? 1 : 0, register ? 1 : 0);
       });
       return this.session(this.one('SELECT * FROM members WHERE id=?', id));
     }
     if (method === 'GET' && /^\/api\/invitation\/[a-f0-9]{64}$/.test(path)) {
       this.rateLimit(`invite:${ipKey}`, 60, 900);
-      const family = this.one('SELECT name FROM family WHERE invite_hash=?', await digest(path.split('/').pop()));
+      const family = this.one('SELECT id,name FROM family WHERE invite_hash=?', await digest(path.split('/').pop()));
       if (!family) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
-      const admin = this.one('SELECT name FROM members WHERE is_admin=1 LIMIT 1');
+      const admin = this.one('SELECT name FROM members WHERE family_id=? AND is_admin=1 LIMIT 1', family.id);
       return json({ familyName: family.name, from: admin?.name || null });
     }
     // Jednorazowy link: nowe hasło albo przejęcie listy prowadzonej przez kogoś innego.
@@ -264,7 +267,7 @@ export class FamilyStore extends DurableObject {
     if (method === 'POST' && path === '/api/members') {
       if (!me.can_add && !me.is_admin) fail(403, 'Nie możesz dodawać osób. Poproś organizatora.');
       const name = text(body.name, 'Imię', 60, true), id = crypto.randomUUID();
-      if (this.one('SELECT COUNT(*) AS n FROM members').n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
+      if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', me.family_id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
       // Osoba bez konta: adres zastępczy i puste hasło — nie da się na nią zalogować.
       this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,managed_by) VALUES(?,?,?,?,?,?,?)', id, me.family_id, name, `managed:${id}`, '', '', me.id);
       return json({ id }, 201);
