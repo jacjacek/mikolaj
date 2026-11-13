@@ -57,6 +57,43 @@ function wishFields(body) {
 }
 // Stare wpisy miały cenę zamiast przedziału.
 const tierOf = price => price == null ? 'ok' : price < 50 ? 'small' : price < 200 ? 'ok' : price <= 300 ? 'good' : 'angel';
+const pl = (n, one, few, many) => n === 1 ? one : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? few : many;
+
+/* ---------- maile (Resend) ---------- */
+const MAIL_FROM = 'Mikołaj <listdo@mikolaja.pl>';
+const APP_URL = 'https://list.do.mikolaja.pl';
+const TEST_TO = 'j@walasek.xyz';   // tylko na ten adres idzie mail testowy
+const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+const SERIF = "Georgia,'Times New Roman',serif";
+// Ta sama estetyka co strona: biel, ciemna szarość, szeryf w nagłówku, mały prostokątny przycisk.
+function mailHtml({ heading, lines = [], quote, button, foot }) {
+  const td = (style, inner) => `<tr><td style="${style}">${inner}</td></tr>`;
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escHtml(heading)}</title></head>
+<body style="margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;"><tr><td align="center" style="padding:44px 24px 56px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
+${td(`font:400 20px/1 ${SERIF};color:#262626;padding:0 0 52px;`, 'Mikołaj')}
+${td(`font:400 36px/1.08 ${SERIF};color:#262626;letter-spacing:-0.5px;padding:0 0 22px;`, escHtml(heading))}
+${lines.map(l => td(`font:400 16px/1.6 ${SANS};color:#6b6b6b;padding:0 0 14px;`, escHtml(l))).join('\n')}
+${quote ? td(`font:italic 400 18px/1.6 ${SERIF};color:#6b6b6b;padding:14px 0 18px;`, `<span style="color:#262626;">Drogi Mikołaju,</span> ${escHtml(quote)}`) : ''}
+${button ? td('padding:18px 0 8px;', `<a href="${escHtml(button.url)}" style="display:inline-block;background:#262626;color:#ffffff;font:500 15px/1 ${SANS};text-decoration:none;padding:13px 18px;border-radius:4px;">${escHtml(button.label)}</a>`) : ''}
+${td(`font:400 13px/1.6 ${SANS};color:#8c8c8c;padding:44px 0 0;`, `${foot ? escHtml(foot) + '<br>' : ''}<a href="${APP_URL}" style="color:#8c8c8c;">list.do.mikolaja.pl</a> — rodzinne listy do Mikołaja`)}
+</table></td></tr></table></body></html>`;
+}
+const mailText = ({ heading, lines = [], quote, button, foot }) =>
+  [heading, '', ...lines, quote ? `\nDrogi Mikołaju, ${quote}` : '', button ? `\n${button.label}: ${button.url}` : '', '', foot || '', 'list.do.mikolaja.pl — rodzinne listy do Mikołaja'].join('\n').replace(/\n{3,}/g, '\n\n');
+async function sendMail(env, to, message) {
+  if (!env.RESEND_API_KEY) fail(503, 'Wysyłanie maili nie jest jeszcze włączone.');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: message.subject, html: mailHtml(message), text: mailText(message) }),
+  });
+  // Bez treści i adresów w logach.
+  if (!res.ok) { console.error('Mikolaj mail failed', res.status); fail(502, 'Nie udało się wysłać maila. Spróbuj ponownie za chwilę.'); }
+}
+
 const cookie = (token, age = SESSION_AGE) => `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${age}`;
 
 export class FamilyStore extends DurableObject {
@@ -100,11 +137,32 @@ export class FamilyStore extends DurableObject {
     this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + SESSION_AGE);
     return json({ ok: true }, 200, { 'Set-Cookie': cookie(token) });
   }
-  async link(member, origin) {
+  async newLink(member) {
     const token = random();
     this.sql.exec('DELETE FROM links WHERE member_id=? OR expires < ?', member.id, now());
     this.sql.exec('INSERT INTO links(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + LINK_AGE);
-    return json({ url: `${origin}/#link=${token}` });
+    return token;
+  }
+  async link(member, origin) { return json({ url: `${origin}/#link=${await this.newLink(member)}` }); }
+  // Raz w roku, tydzień przed Wigilią: co zostało do kupienia i czy jest list.
+  async remind() {
+    const year = new Date().getUTCFullYear();
+    if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
+    this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?)', `remind:${year}`, now() + 60 * 60 * 24 * 300);
+    let sent = 0;
+    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL')) {
+      const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
+      const wishes = this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', p.id).n;
+      const lines = [];
+      if (todo) lines.push(`Masz jeszcze ${todo} ${pl(todo, 'prezent', 'prezenty', 'prezentów')} do kupienia.`);
+      if (!p.letter && !wishes) lines.push('Nie masz jeszcze listu ani życzeń — bliscy nie wiedzą, co Ci kupić.');
+      if (!lines.length) continue;
+      try {
+        await sendMail(this.env, p.email, { subject: 'Za tydzień Wigilia', heading: `Za tydzień Wigilia, ${p.name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
+        sent++;
+      } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
+    }
+    return { sent };
   }
 
   // Wszystko, czego potrzebuje aplikacja — przycięte do tego, co ta osoba może wiedzieć.
@@ -221,6 +279,38 @@ export class FamilyStore extends DurableObject {
       const admin = this.one('SELECT name FROM members WHERE family_id=? AND is_admin=1 LIMIT 1', family.id);
       return json({ familyName: family.name, from: admin?.name || null });
     }
+    // Zapomniane hasło: link mailem. Odpowiedź zawsze ta sama — nie zdradza, czy konto istnieje.
+    if (method === 'POST' && path === '/api/forgot') {
+      this.rateLimit(`auth:${ipKey}`, 30, 900);
+      this.rateLimit(`forgot:${ipKey}`, 5, 3600);
+      const e = email(body.email);
+      const m = this.one('SELECT * FROM members WHERE email=? AND managed_by IS NULL', e);
+      if (m && this.env.RESEND_API_KEY) {
+        this.rateLimit(`forgot-to:${await digest(e)}`, 3, 86400);
+        await sendMail(this.env, m.email, {
+          subject: 'Nowe hasło do listów do Mikołaja', heading: `Cześć, ${m.name}`,
+          lines: ['Ktoś poprosił o nowe hasło do Twojego konta. Jeśli to Ty — kliknij poniżej i ustaw nowe.'],
+          button: { label: 'Ustaw nowe hasło', url: `${url.origin}/#link=${await this.newLink(m)}` },
+          foot: 'Link działa raz, przez 3 dni. Jeśli to nie Ty, po prostu zignoruj tę wiadomość.',
+        });
+      }
+      return json({ ok: true });
+    }
+    // Mail testowy — wyłącznie na stały adres właściciela, najwyżej 3 razy na dobę.
+    if (method === 'POST' && path === '/api/mail-test') {
+      this.rateLimit('mail-test', 3, 86400);
+      await sendMail(this.env, TEST_TO, {
+        subject: 'Mikołaj — test wysyłki', heading: 'Maile działają',
+        lines: ['To wiadomość testowa z list.do.mikolaja.pl. Tak będą wyglądać zaproszenia, nowe hasła i przypomnienie przed Wigilią.', 'Ania zaprasza Cię do rodziny Kowalskich — do wspólnych list do Mikołaja.'],
+        quote: 'w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!',
+        button: { label: 'Dołączam', url: APP_URL },
+        foot: 'Dostajesz tę wiadomość, bo testujemy wysyłkę.',
+      });
+      return json({ ok: true });
+    }
+    // Wywołanie z harmonogramu (Worker blokuje /api/internal/ z zewnątrz).
+    if (method === 'POST' && path === '/api/internal/remind') return json(await this.remind());
+
     // Jednorazowy link: nowe hasło albo przejęcie listy prowadzonej przez kogoś innego.
     const linkMatch = path.match(/^\/api\/link\/([a-f0-9]{64})$/);
     if (linkMatch) {
@@ -249,7 +339,7 @@ export class FamilyStore extends DurableObject {
     const token = request.headers.get('Cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || '';
     const sessionHash = /^[a-f0-9]{64}$/.test(token) ? await digest(token) : '';
     const me = sessionHash ? this.one('SELECT m.*,s.admin_until FROM members m JOIN sessions s ON s.member_id=m.id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
-    if (method === 'GET' && path === '/api/state') return json(me ? this.state(me) : { user: null });
+    if (method === 'GET' && path === '/api/state') return json(me ? { ...this.state(me), mail: Boolean(this.env.RESEND_API_KEY) } : { user: null, mail: Boolean(this.env.RESEND_API_KEY) });
     if (method === 'POST' && path === '/api/logout') {
       this.sql.exec('DELETE FROM sessions WHERE hash=?', sessionHash);
       return json({ ok: true }, 200, { 'Set-Cookie': cookie('', 0) });
@@ -266,6 +356,19 @@ export class FamilyStore extends DurableObject {
     if (method === 'PATCH' && path === '/api/session') {
       adminOnly();
       this.sql.exec('UPDATE sessions SET admin_until=? WHERE hash=?', body.adminMode === true ? now() + 3600 : 0, sessionHash);
+      return json({ ok: true });
+    }
+    if (method === 'POST' && path === '/api/invite/email') {
+      adminOnly();
+      this.rateLimit(`invite-mail:${me.id}`, 30, 86400);
+      const to = email(body.email);
+      const family = this.one('SELECT name,invite FROM family WHERE id=?', me.family_id);
+      await sendMail(this.env, to, {
+        subject: `${me.name} zaprasza Cię do listów do Mikołaja`, heading: 'Zaproszenie',
+        lines: [`${me.name} zaprasza Cię do rodziny ${family.name} — do wspólnych list do Mikołaja.`, 'Każdy pisze list i życzenia, a bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego. Niespodzianka zostaje niespodzianką.'],
+        button: { label: 'Dołączam', url: `${url.origin}/#invite=${family.invite}` },
+        foot: 'Jeśli nie znasz nadawcy, zignoruj tę wiadomość.',
+      });
       return json({ ok: true });
     }
     if (method === 'POST' && path === '/api/invite') {
@@ -401,6 +504,7 @@ export default {
       const response = json({ revision: env.DEPLOY_REVISION || 'manual', branch: env.DEPLOY_BRANCH || null });
       return request.method === 'HEAD' ? new Response(null, { headers: response.headers }) : response;
     }
+    if (url.pathname.startsWith('/api/internal/')) return json({ error: 'Nie znaleziono tej strony.' }, 404);
     if (url.pathname.startsWith('/api/')) return env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request);
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Niedozwolona metoda.' }, 405);
     const assets = {
@@ -420,5 +524,10 @@ export default {
       return new Response(body, { headers: { ...headers, 'Content-Security-Policy': SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`) } });
     }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
+  },
+  // Harmonogram (17 grudnia rano): przypomnienie przed Wigilią.
+  async scheduled(controller, env, ctx) {
+    const request = new Request('https://internal.invalid/api/internal/remind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    ctx.waitUntil(env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request));
   },
 };

@@ -463,7 +463,10 @@ function vFamily() {
       <button class="a solid" data-act="copy-invite">Skopiuj link</button>
       <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
     </div>
-    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}`;
+    ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
+    ${S.data.mail ? `<form class="form mt" data-form="invite-mail"><label class="sr" for="f-invite-mail">E-mail</label>
+      <input class="in" id="f-invite-mail" name="email" type="email" placeholder="albo wyślij mailem — wpisz adres" required>
+      <div class="actions"><button class="a">Wyślij zaproszenie</button></div></form>` : ''}`;
   const addPeople = `<h2 class="label">Dodaj osoby</h2>
     <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz dać im własne konto linkiem albo zmienić opiekuna.</p>
     <div class="form"><label class="sr" for="f-people">Imiona</label>
@@ -531,6 +534,14 @@ function vAuth() {
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
   </section>`;
+  if (S.screen === 'forgot') return `${PUB()}<section class="auth fade">
+    <h1 class="title">Nowe hasło</h1>
+    <p class="sub">Podaj e-mail swojego konta — wyślemy link do ustawienia nowego hasła.</p>
+    <form class="form" data-form="forgot">
+      <input class="in" name="email" type="email" placeholder="E-mail" required autocomplete="email">
+      <div class="actions"><button class="a solid">Wyślij link</button><button type="button" class="a quiet" data-go="login">Wróć do logowania</button></div>
+    </form>
+  </section>`;
   if (S.screen !== 'login') return vLanding();
   return `${PUB()}<section class="auth fade">
     <h1 class="title">Zaloguj się</h1>
@@ -540,7 +551,8 @@ function vAuth() {
       <input class="in" name="password" type="password" placeholder="Hasło" required autocomplete="current-password">
       <div class="actions"><button class="a solid">Zaloguj się</button></div>
     </form>
-    <p class="foot">Nie masz konta? <button class="a" data-go="register">Załóż rodzinę</button> albo poproś bliskich o link zaproszenia. Zapomniane hasło? Organizator rodziny wyśle Ci nowy link.</p>
+    <p class="foot">Nie masz konta? <button class="a" data-go="register">Załóż rodzinę</button> albo poproś bliskich o link zaproszenia.
+      ${S.data?.mail ? 'Nie pamiętasz hasła? <button class="a" data-go="forgot">Wyślemy link</button>' : 'Zapomniane hasło? Organizator rodziny wyśle Ci nowy link.'}</p>
   </section>`;
 }
 
@@ -585,12 +597,12 @@ function scheduleModeEnd() {
   if (S.data?.user && god()) modeTimer = setTimeout(() => act(async () => {}, 'Tryb organizatora wyłączył się'), me().adminUntil * 1000 - Date.now() + 500);
 }
 const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
-const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz' };
+const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz', forgot: '#/haslo' };
 function render(animate = false) {
   const y = window.scrollY;
   const loggedIn = S.data?.user;
   if (loggedIn && !TABS[S.screen] && S.screen !== 'edit') S.screen = 'lists';
-  if (!loggedIn && !['login', 'register', 'join', 'link'].includes(S.screen)) S.screen = 'landing';
+  if (!loggedIn && !['login', 'register', 'join', 'link', 'forgot'].includes(S.screen)) S.screen = 'landing';
   if ((S.screen === 'family' || S.screen === 'edit') && !me()?.isAdmin) S.screen = 'lists';
   scheduleModeEnd();
   const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
@@ -769,6 +781,9 @@ document.addEventListener('submit', e => {
   e.preventDefault();
   const form = e.target, body = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
+  if (kind === 'invite-mail') return act(() => api('invite/email', 'POST', body), `Zaproszenie wysłane na ${body.email}`);
+  if (kind === 'forgot') return act(async () => { await api('forgot', 'POST', body); S.screen = 'login'; history.replaceState(null, '', PUBLIC.login); },
+    'Jeśli konto istnieje, wysłaliśmy link. Sprawdź skrzynkę — także spam.');
   act(async () => {
     if (kind === 'login') await api('login', 'POST', body);
     if (kind === 'register') await api('register', 'POST', body);

@@ -131,6 +131,9 @@ def main():
         if args.ci and (not family or family.get('type') != 'durable_object_namespace' or family.get('class_name') != 'FamilyStore' or not family.get('namespace_id')):
             raise RuntimeError('CI refuses to change an unexpected FAMILY binding')
         previous_namespace = family.get('namespace_id') if family else None
+        # Klucz Resend dodaje się ręcznie w panelu — zachowaj go przy każdym wdrożeniu.
+        if any(binding.get('name') == 'RESEND_API_KEY' for binding in settings.get('bindings', [])):
+            bindings.append({'type': 'inherit', 'name': 'RESEND_API_KEY'})
     else:
         setup, private = persist_bootstrap(name, rotate=args.rotate_setup_token)
         bindings.append({'type': 'secret_text', 'name': 'SETUP_TOKEN', 'text': setup})
@@ -160,6 +163,9 @@ def main():
         raise RuntimeError('Read-back failed: incorrect deployment branch')
     if setup:
         print('Private bootstrap persisted before upload:', private)
+    if not args.preview:
+        # Przypomnienie przed Wigilią: 17 grudnia, 9:00 UTC.
+        api(prefix + f'/scripts/{name}/schedules', 'PUT', [{'cron': '0 9 17 12 *'}])
     if args.preview:
         if not args.ci:
             api(prefix + f'/scripts/{name}/subdomain', 'POST', {'enabled': True, 'previews_enabled': False})
