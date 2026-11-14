@@ -58,7 +58,7 @@ const email = value => {
   return e;
 };
 const password = value => {
-  if (typeof value !== 'string' || value.length < 4 || value.length > 256) fail(400, 'Hasło musi mieć co najmniej 4 znaki.');
+  if (typeof value !== 'string' || value.length < 15 || value.length > 256) fail(400, 'Hasło musi mieć co najmniej 15 znaków.');
   return value;
 };
 function wishFields(body) {
@@ -134,6 +134,7 @@ export class FamilyStore extends DurableObject {
       if (!this.rows(`PRAGMA table_info(${table})`).some(c => c.name === column)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     };
     addColumn('reservations', 'snapshot', "TEXT NOT NULL DEFAULT '{}'");
+    addColumn('members', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('members', 'managed_by', 'TEXT');           // osoba bez konta — list prowadzi ten członek
     addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('wishes', 'tier', 'TEXT');
@@ -151,14 +152,22 @@ export class FamilyStore extends DurableObject {
   }
   async session(member) {
     const token = random();
-    this.sql.exec('DELETE FROM sessions WHERE expires < ?', now());
-    this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + SESSION_AGE);
+    const hash = await digest(token);
+    this.ctx.storage.transactionSync(() => {
+      const current = this.one('SELECT password_hash FROM members WHERE id=?', member.id);
+      if (!current || current.password_hash !== member.password_hash) fail(401, 'Dane logowania zmieniły się. Zaloguj się ponownie.');
+      this.sql.exec('DELETE FROM sessions WHERE expires < ?', now());
+      this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', hash, member.id, now() + SESSION_AGE);
+    });
     return json({ ok: true }, 200, { 'Set-Cookie': cookie(token) });
   }
   async newLink(member) {
     const token = random();
-    this.sql.exec('DELETE FROM links WHERE member_id=? OR expires < ?', member.id, now());
-    this.sql.exec('INSERT INTO links(hash,member_id,expires) VALUES(?,?,?)', await digest(token), member.id, now() + LINK_AGE);
+    const hash = await digest(token);
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM links WHERE member_id=? OR expires < ?', member.id, now());
+      this.sql.exec('INSERT INTO links(hash,member_id,expires) VALUES(?,?,?)', hash, member.id, now() + LINK_AGE);
+    });
     return token;
   }
   async link(member, origin) { return json({ url: `${origin}/#link=${await this.newLink(member)}` }); }
@@ -168,7 +177,7 @@ export class FamilyStore extends DurableObject {
     if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
     this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?)', `remind:${year}`, now() + 60 * 60 * 24 * 300);
     let sent = 0;
-    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL')) {
+    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL AND email_verified=1')) {
       const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
       const wishes = this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', p.id).n;
       const lines = [];
@@ -194,13 +203,21 @@ export class FamilyStore extends DurableObject {
     if (!this.env.RESEND_API_KEY) return { sent: 0 };
     const fresh = this.rows(`SELECT w.title,w.owner_id,m.name AS owner,m.managed_by,m.family_id FROM wishes w JOIN members m ON m.id=w.owner_id
       LEFT JOIN reservations r ON r.wish_id=w.id WHERE w.created_at>? AND w.created_at<=? AND r.wish_id IS NULL ORDER BY m.name,w.created_at`, since, until);
-    const picks = this.rows(`SELECT r.member_id,w.title,m.name AS owner,m.family_id FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id
+    const picks = this.rows(`SELECT r.member_id,w.title,w.owner_id,m.name AS owner,m.family_id FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id
       WHERE r.reserved_at>=? AND r.reserved_at<? AND r.purchased=0 ORDER BY m.name,w.created_at`, Math.floor(Date.parse(since) / 1000), Math.floor(Date.parse(until) / 1000));
     const families = [...new Set([...fresh, ...picks].map(x => x.family_id))];
-    const byOwner = list => Object.entries(list.reduce((g, x) => ((g[x.owner] ||= []).push(x.title), g), {})).map(([o, t]) => `${o}: ${t.join(', ')}`);
+    const byOwner = list => {
+      const groups = new Map();
+      for (const item of list) {
+        const key = item.owner_id;
+        if (!groups.has(key)) groups.set(key, { name: item.owner, titles: [] });
+        groups.get(key).titles.push(item.title);
+      }
+      return [...groups.values()].map(g => `${g.name}: ${g.titles.join(', ')}`);
+    };
     let sent = 0;
     for (const fid of families) {
-      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL', fid)) {
+      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL AND email_verified=1', fid)) {
         const mine = picks.filter(x => x.member_id === p.id);
         const news = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
         if (!mine.length && !news.length) continue;
@@ -251,11 +268,9 @@ export class FamilyStore extends DurableObject {
     // Kto co kupuje — tylko w tymczasowym trybie organizatora.
     const all = !this.god(me) ? [] : this.rows(`SELECT w.id AS wishId,w.title,w.tier,w.owner_id AS ownerId,r.member_id AS buyerId,r.purchased
       FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id WHERE m.family_id=? ORDER BY w.created_at`, me.family_id);
-    const hidden = {};
-    for (const r of all) if (r.ownerId === me.id) hidden[r.buyerId] = (hidden[r.buyerId] || 0) + 1;
     const reservations = all.filter(r => r.ownerId !== me.id).map(r => ({ ...r, purchased: Boolean(r.purchased) }));
     const invite = this.one('SELECT invite FROM family WHERE id=?', me.family_id).invite;
-    return { invite: `${origin}/#invite=${invite}`, members, reservations, hidden, locked: !this.god(me) };
+    return { invite: `${origin}/#invite=${invite}`, members, reservations, locked: !this.god(me) };
   }
 
   async fetch(request) {
@@ -277,7 +292,21 @@ export class FamilyStore extends DurableObject {
       if ((origin && origin !== url.origin) || request.headers.get('Sec-Fetch-Site') === 'cross-site') fail(403, 'Ta operacja wymaga otwarcia aplikacji w jej własnej domenie.');
       if (method !== 'DELETE') {
         if (!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json')) fail(415, 'Oczekiwano danych JSON.');
-        const raw = await request.text();
+        if (Number(request.headers.get('Content-Length')) > 16000) fail(413, 'Przesłany formularz jest za duży.');
+        const reader = request.body?.getReader();
+        const chunks = []; let size = 0;
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 16000) { await reader.cancel(); fail(413, 'Przesłany formularz jest za duży.'); }
+            chunks.push(value);
+          }
+        }
+        const bytes = new Uint8Array(size); let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        const raw = new TextDecoder().decode(bytes);
         if (raw.length > 16000) fail(413, 'Przesłany formularz jest za duży.');
         try { body = JSON.parse(raw || '{}'); } catch { fail(400, 'Niepoprawny formularz. Odśwież stronę i spróbuj ponownie.'); }
         if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Niepoprawny formularz.');
@@ -340,6 +369,7 @@ export class FamilyStore extends DurableObject {
       const e = email(body.email);
       const m = this.one('SELECT * FROM members WHERE email=? AND managed_by IS NULL', e);
       if (m && this.env.RESEND_API_KEY) {
+        try {
         this.rateLimit(`forgot-to:${await digest(e)}`, 3, 86400);
         await sendMail(this.env, m.email, {
           subject: 'Nowe hasło do listów do Mikołaja', heading: `Cześć, ${m.name}`,
@@ -347,6 +377,7 @@ export class FamilyStore extends DurableObject {
           button: { label: 'Ustaw nowe hasło', url: `${url.origin}/#link=${await this.newLink(m)}` },
           foot: 'Link działa raz, przez 3 dni. Jeśli to nie Ty, po prostu zignoruj tę wiadomość.',
         });
+        } catch (error) { if (!(error instanceof AppError)) throw error; }
       }
       return json({ ok: true });
     }
@@ -371,11 +402,11 @@ export class FamilyStore extends DurableObject {
         member = find();
         if (!member) fail(404, 'Ten link wygasł albo został już użyty.');
         if (this.one('SELECT id FROM members WHERE email=? AND id<>?', e, member.id)) fail(409, 'Ten adres jest już używany.');
-        this.sql.exec('UPDATE members SET email=?,salt=?,password_hash=?,managed_by=NULL WHERE id=?', e, salt, pw, member.id);
+        this.sql.exec('UPDATE members SET email_verified=CASE WHEN managed_by IS NULL THEN 1 ELSE 0 END,email=?,salt=?,password_hash=?,managed_by=NULL WHERE id=?', e, salt, pw, member.id);
         this.sql.exec('DELETE FROM links WHERE member_id=?', member.id);
         this.sql.exec('DELETE FROM sessions WHERE member_id=?', member.id);
       });
-      return this.session(member);
+      return this.session(this.one('SELECT * FROM members WHERE id=?', member.id));
     }
 
     // ---------- z logowaniem ----------
@@ -440,24 +471,29 @@ export class FamilyStore extends DurableObject {
       }
       if (memberMatch[2] === '/link' && method === 'POST') {
         if (!me.is_admin && target.managed_by !== me.id) fail(403, 'Brak uprawnień.');
+        if (!target.managed_by) fail(403, 'Osoba z własnym kontem musi użyć odzyskiwania hasła przez e-mail.');
         return this.link(target, url.origin);
       }
       if (!memberMatch[2] && method === 'PATCH') {
         adminOnly();
+        this.ctx.storage.transactionSync(() => {
         if (typeof body.canAdd === 'boolean') this.sql.exec('UPDATE members SET can_add=? WHERE id=?', body.canAdd ? 1 : 0, target.id);
         if (body.managedBy !== undefined) {
           if (!target.managed_by) fail(400, 'Ta osoba ma własne konto.');
           const manager = member(body.managedBy);
           if (manager.managed_by) fail(400, 'Opiekun musi mieć własne konto.');
           this.sql.exec('UPDATE members SET managed_by=? WHERE id=?', manager.id, target.id);
+          this.sql.exec('DELETE FROM links WHERE member_id=?', target.id);
         }
         if (body.admin === true) {
           if (target.managed_by) fail(400, 'Organizator musi mieć własne konto.');
-          this.ctx.storage.transactionSync(() => {
+          {
+            this.sql.exec('DELETE FROM links WHERE member_id IN (SELECT id FROM members WHERE family_id=?)', me.family_id);
             this.sql.exec('UPDATE members SET is_admin=0 WHERE family_id=?', me.family_id);
             this.sql.exec('UPDATE members SET is_admin=1 WHERE id=?', target.id);
-          });
+          }
         }
+        });
         return json({ ok: true });
       }
       if (!memberMatch[2] && method === 'DELETE') {
@@ -517,7 +553,7 @@ export class FamilyStore extends DurableObject {
           if (reservation && !god) fail(409, 'Ktoś już wybrał ten prezent. Wybierz inny.');
           const snap = JSON.stringify({ title: w.title, note: w.note, url: w.url, tier: w.tier });
           // Odczyt i zapis bez await pomiędzy — atomowe w obrębie Durable Object.
-          if (reservation) this.sql.exec('UPDATE reservations SET member_id=?,snapshot=?,reserved_at=? WHERE wish_id=?', buyer.id, snap, now(), w.id);
+          if (reservation) this.sql.exec('UPDATE reservations SET purchased=CASE WHEN member_id=? THEN purchased ELSE 0 END,member_id=?,snapshot=?,reserved_at=? WHERE wish_id=?', buyer.id, buyer.id, snap, now(), w.id);
           else this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot,reserved_at) VALUES(?,?,0,?,?)', w.id, buyer.id, snap, now());
           return json({ ok: true });
         }
