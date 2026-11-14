@@ -35,8 +35,11 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Mikołaj">
-  <!-- tylko font tekstu (LCP na telefonie); reszta dociąga się po pierwszym malowaniu -->
+  <!-- podstawowe części fontów (łacina + polskie znaki, ~98 KB) — od razu; części -ext tylko na żądanie -->
   <link rel="preload" href="/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/newsreader.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/newsreader-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
   <script>
     // Przed pierwszym malowaniem: zapamiętany motyw i ukrycie gotowej strony startowej, gdy adres prowadzi gdzie indziej.

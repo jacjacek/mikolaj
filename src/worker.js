@@ -20,6 +20,10 @@ import mark from '../public/mark.webp';
 import ogImage from '../public/og.png';
 import fontInter400 from '../public/inter-400.woff2';
 import fontInter500 from '../public/inter-500.woff2';
+import fontInter400Ext from '../public/inter-400-ext.woff2';
+import fontInter500Ext from '../public/inter-500-ext.woff2';
+import fontNewsreaderExt from '../public/newsreader-ext.woff2';
+import fontNewsreaderItalicExt from '../public/newsreader-italic-ext.woff2';
 import fontNewsreader from '../public/newsreader.woff2';
 import fontNewsreaderItalic from '../public/newsreader-italic.woff2';
 
@@ -742,6 +746,10 @@ export default {
       '/og.png': [ogImage, 'image/png'],
       '/inter-400.woff2': [fontInter400, 'font/woff2'],
       '/inter-500.woff2': [fontInter500, 'font/woff2'],
+      '/inter-400-ext.woff2': [fontInter400Ext, 'font/woff2'],
+      '/inter-500-ext.woff2': [fontInter500Ext, 'font/woff2'],
+      '/newsreader-ext.woff2': [fontNewsreaderExt, 'font/woff2'],
+      '/newsreader-italic-ext.woff2': [fontNewsreaderItalicExt, 'font/woff2'],
       '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
       '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
       '/robots.txt': [ROBOTS, 'text/plain; charset=utf-8'],

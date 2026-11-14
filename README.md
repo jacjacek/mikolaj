@@ -67,7 +67,8 @@ public/            frontend — plain HTML, CSS and ES-module JavaScript, no bui
   index.html       includes the pre-rendered landing page, so it paints before any JavaScript
   app.css          inlined into the HTML by the Worker (nonce'd <style>), also served on its own
   app.js
-  *.woff2          self-hosted Inter and Newsreader, subset to Latin + Polish
+  *.woff2          self-hosted Inter and Newsreader: a preloaded core (Latin + Polish) and an -ext part
+                   for other Latin letters, fetched only when such a character is on the page
   *.png, *.webp, favicon.ico, site.webmanifest   icons and web-app manifest
 src/worker.js      Cloudflare Worker + one SQLite-backed Durable Object (FamilyStore)
 scripts/
