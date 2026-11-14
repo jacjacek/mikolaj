@@ -713,10 +713,14 @@ function setTheme(t) {
 }
 
 /* ===================== ZDARZENIA ===================== */
+// Gotowa strona startowa jest klikalna, zanim start() dostanie stan z serwera — takie
+// kliknięcie zapamiętuje skrypt w index.html, a start() powtarza je, zamiast je nadpisać.
+let booted = false;
 document.addEventListener('click', e => {
   const t = e.target.closest('[data-go],[data-toggle],[data-edit],[data-act],[data-filter]');
   if (!t) return;
   const d = t.dataset;
+  if (!booted) return;
   if (d.go) return go(d.go);
   if (d.toggle) { toggleFold(d.toggle); return syncAll(); }
   if (d.edit) { S.editWish = d.edit; S.adding = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); render(); return focusFirst(); }
@@ -872,6 +876,9 @@ async function start() {
   if (S.token && S.data.user && S.screen === 'join') S.screen = 'joinfam';
   else if (S.token && S.data.user) S.data = { user: null };
   render(true);
+  const early = window.earlyClick;
+  booted = true;
+  if (early && !S.data.user && S.screen === 'landing') $(early)?.click();
   if (S.screen === 'family' && S.data.user) act(() => {});
 }
 start();

@@ -42,6 +42,8 @@
     // Przed pierwszym malowaniem: zapamiętany motyw i ukrycie gotowej strony startowej, gdy adres prowadzi gdzie indziej.
     try { const t = localStorage.getItem('mikolaj.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch {}
     if (!/^(#\/?)?$/.test(location.hash)) document.documentElement.classList.add('deep');
+    // Kliknięcie w gotową stronę, zanim aplikacja wystartuje — app.js powtórzy je po starcie.
+    document.addEventListener('click', e => { const t = e.target.closest?.('[data-go],[data-act]'); if (t) window.earlyClick = t.dataset.go ? `[data-go="${t.dataset.go}"]` : `[data-act="${t.dataset.act}"]`; });
   </script>
   <script type="module" src="/app.js"></script>
 </head>
