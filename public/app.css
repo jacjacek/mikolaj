@@ -116,8 +116,8 @@ button[disabled] { opacity: .5; cursor: default; }
 .a.solid, .a.line { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 14px; font-weight: 500; line-height: 1.4; }
 .a.solid { background: var(--ink); color: var(--bg); }
 .a.solid:hover { opacity: .85; }
-.a.line { color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 30%, transparent); }
-.a.line:hover { box-shadow: inset 0 0 0 1px var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.a.line { color: var(--ink); background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.a.line:hover { background: color-mix(in srgb, var(--ink) 13%, transparent); }
 .changed { grid-column: 1 / -1; color: var(--soft); font: italic 400 15px/1.5 var(--serif); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; font-size: 15px; }
 .empty { color: var(--faint); font-size: 15px; padding: 6px 0; margin: 0; }
