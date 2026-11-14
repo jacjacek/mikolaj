@@ -584,7 +584,7 @@ function vLanding() {
   <section class="landing fade">
     <div class="hero-grid"><div>
     <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
-    <p class="lead">Każdy pisze, czego by chciał. Bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego — a niespodzianka zostaje niespodzianką.</p>
+    <p class="lead">Każdy pisze, o czym marzy. Bliscy wybierają, na co kto zasłużył, i dają znać, że to kupują — więc nic się nie powtórzy, a prezent zostaje niespodzianką.</p>
     <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
     <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-act="demo">Zobacz przykład</button></div>
     </div><p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p></div>
