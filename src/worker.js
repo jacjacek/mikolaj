@@ -18,7 +18,8 @@ import icon512 from '../public/icon-512x512.png';
 import iconMaskable from '../public/icon-maskable-512x512.png';
 import mark from '../public/mark.webp';
 import ogImage from '../public/og.png';
-import fontInter from '../public/inter.woff2';
+import fontInter400 from '../public/inter-400.woff2';
+import fontInter500 from '../public/inter-500.woff2';
 import fontNewsreader from '../public/newsreader.woff2';
 import fontNewsreaderItalic from '../public/newsreader-italic.woff2';
 
@@ -739,7 +740,8 @@ export default {
       '/icon-maskable-512x512.png': [iconMaskable, 'image/png'],
       '/mark.webp': [mark, 'image/webp'],
       '/og.png': [ogImage, 'image/png'],
-      '/inter.woff2': [fontInter, 'font/woff2'],
+      '/inter-400.woff2': [fontInter400, 'font/woff2'],
+      '/inter-500.woff2': [fontInter500, 'font/woff2'],
       '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
       '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
       '/robots.txt': [ROBOTS, 'text/plain; charset=utf-8'],

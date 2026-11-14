@@ -1,5 +1,6 @@
-/* fonty u siebie: podzbiór łaciński z polskimi znakami (Inter 400–500, Newsreader 400 z osią opsz) */
-@font-face { font-family: "Inter"; src: url(/inter.woff2) format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
+/* fonty u siebie: podzbiór łaciński z polskimi znakami (Inter 400 i 500 statycznie — mniej bajtów przed pierwszym malowaniem; Newsreader 400 z osią opsz) */
+@font-face { font-family: "Inter"; src: url(/inter-400.woff2) format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Inter"; src: url(/inter-500.woff2) format("woff2"); font-weight: 500; font-style: normal; font-display: swap; }
 @font-face { font-family: "Newsreader"; src: url(/newsreader.woff2) format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
 @font-face { font-family: "Newsreader"; src: url(/newsreader-italic.woff2) format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
 
