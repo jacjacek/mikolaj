@@ -143,7 +143,7 @@ export class FamilyStore extends DurableObject {
     return token;
   }
   async link(member, origin) { return json({ url: `${origin}/#link=${await this.newLink(member)}` }); }
-  // Raz w roku, tydzień przed Wigilią: co zostało do kupienia i czy jest list.
+  // Raz w roku, trzy tygodnie przed Wigilią: co zostało do kupienia i czy jest list.
   async remind() {
     const year = new Date().getUTCFullYear();
     if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
@@ -157,7 +157,7 @@ export class FamilyStore extends DurableObject {
       if (!p.letter && !wishes) lines.push('Nie masz jeszcze listu ani życzeń — bliscy nie wiedzą, co Ci kupić.');
       if (!lines.length) continue;
       try {
-        await sendMail(this.env, p.email, { subject: 'Za tydzień Wigilia', heading: `Za tydzień Wigilia, ${p.name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
+        await sendMail(this.env, p.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${p.name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
         sent++;
       } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
     }
@@ -511,7 +511,7 @@ export default {
     }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
   },
-  // Harmonogram (17 grudnia rano): przypomnienie przed Wigilią.
+  // Harmonogram (3 grudnia rano): przypomnienie przed Wigilią.
   async scheduled(controller, env, ctx) {
     const request = new Request('https://internal.invalid/api/internal/remind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     ctx.waitUntil(env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request));
