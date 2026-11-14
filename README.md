@@ -44,6 +44,7 @@ One e-mail and password can belong to any number of families — say, your own a
 
 Whoever creates a family becomes its organiser and gets the **Rodzina** tab:
 
+- renaming the family,
 - invitation link (copy or regenerate) and e-mail invitations,
 - bulk-adding people without accounts, one name per line,
 - per-person actions: password-reset link, permission to add people, change of manager, hand over the organiser role, remove from the family,

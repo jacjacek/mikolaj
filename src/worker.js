@@ -612,6 +612,11 @@ export class FamilyStore extends DurableObject {
       });
       return json({ ok: true });
     }
+    if (method === 'PATCH' && path === '/api/family') {
+      adminOnly();
+      this.sql.exec('UPDATE family SET name=? WHERE id=?', text(body.name, 'Nazwa rodziny', 80, true), me.family_id);
+      return json({ ok: true });
+    }
     if (method === 'POST' && path === '/api/invite') {
       adminOnly();
       const invite = random();

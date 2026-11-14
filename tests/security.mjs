@@ -255,4 +255,12 @@ await check('Leaving a family', async () => {
   await f.call('switch','POST',{memberId:b.id},b.cookie);
   assert.equal((await f.call('leave','POST',{},b.cookie)).status,409);
 });
+await check('Only the organiser renames the family', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.join(a,'B'), c=await f.register('C');
+  assert.equal((await f.call('family','PATCH',{name:'Hacked'},b.cookie)).status,403);
+  assert.equal((await f.call('family','PATCH',{name:'  '},a.cookie)).status,400);
+  assert.equal((await f.call('family','PATCH',{name:'Nowa nazwa'},a.cookie)).status,200);
+  assert.equal((await f.call('state','GET',undefined,b.cookie)).body.family.name,'Nowa nazwa');
+  assert.equal((await f.call('state','GET',undefined,c.cookie)).body.family.name,'C family');
+});
 console.log(JSON.stringify(results,null,2));

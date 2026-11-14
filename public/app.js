@@ -132,7 +132,7 @@ function demoApi(path, method, body) {
   const out = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
   const [a, id, sub] = path.split('/');
   if (path === 'state') return out({
-    family: { name: 'Nowakowie' },
+    family: { name: D.familyName || 'Nowakowie' },
     user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0 },
     members: D.members.map(({ id, name, letter, managedBy }) => ({ id, name, letter, managedBy })),
     wishes: D.wishes.map(w => {
@@ -148,6 +148,7 @@ function demoApi(path, method, body) {
     reservations: !(D.until > Date.now() / 1000) ? [] : D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
   });
   if (path === 'session') { D.until = body.adminMode ? Math.floor(Date.now() / 1000) + 3600 : 0; return out({ ok: true }); }
+  if (path === 'family') { D.familyName = body.name; return out({ ok: true }); }
   if (path === 'logout' || path === 'invite') return out({ ok: true });
   if (a === 'wishes') {
     if (!id) {
@@ -489,6 +490,10 @@ function vFamily() {
     ${S.data.mail ? `<form class="form mt" data-form="invite-mail"><label class="sr" for="f-invite-mail">E-mail</label>
       <input class="in" id="f-invite-mail" name="email" type="email" placeholder="albo wyślij mailem — wpisz adres" required>
       <div class="actions"><button class="a line">Wyślij zaproszenie</button></div></form>` : ''}`;
+  const rename = `<h2 class="label">Nazwa rodziny</h2>
+    <form class="form" data-form="rename"><label class="sr" for="f-family-name">Nazwa rodziny</label>
+      <input class="in" id="f-family-name" name="name" value="${esc(S.data.family?.name)}" maxlength="80" required>
+      <div class="actions"><button class="a line">Zmień nazwę</button></div></form>`;
   const addPeople = `<h2 class="label">Dodaj osoby</h2>
     <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz przekazać komuś jego listę — dostanie link, ustawi e-mail i hasło i będzie ją prowadzić sam — albo zmienić opiekuna.</p>
     <div class="form"><label class="sr" for="f-people">Imiona</label>
@@ -504,7 +509,7 @@ function vFamily() {
       <div class="split-main">${who}
         <h2 class="label">Osoby · ${A.members.length}</h2>
         ${people.map(row).join('')}</div>
-      <aside class="split-side">${invite}${addPeople}${mode}</aside>
+      <aside class="split-side">${invite}${addPeople}${mode}${rename}</aside>
     </div>
   </section>`;
 }
@@ -834,6 +839,11 @@ document.addEventListener('submit', e => {
   e.preventDefault();
   const form = e.target, body = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
+  if (kind === 'rename') {
+    const name = body.name.trim();
+    if (!name || name === S.data.family?.name) return;
+    return act(() => api('family', 'PATCH', { name }), `Nowa nazwa: ${name}`);
+  }
   if (kind === 'invite-mail') return act(() => api('invite/email', 'POST', body), `Zaproszenie wysłane na ${body.email}`);
   if (kind === 'newfam' || kind === 'joinfam') return act(async () => {
     const r = await api(kind === 'newfam' ? 'families' : 'families/join', 'POST', kind === 'newfam' ? body : { ...body, inviteToken: S.token });
