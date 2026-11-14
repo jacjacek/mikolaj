@@ -146,7 +146,6 @@ function demoApi(path, method, body) {
     members: D.members,
     locked: !(D.until > Date.now() / 1000),
     reservations: !(D.until > Date.now() / 1000) ? [] : D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
-    hidden: D.res.reduce((h, r) => { if (D.wishes.find(w => w.id === r.wishId).ownerId === me.id) h[r.by] = (h[r.by] || 0) + 1; return h; }, {}),
   });
   if (path === 'session') { D.until = body.adminMode ? Math.floor(Date.now() / 1000) + 3600 : 0; return out({ ok: true }); }
   if (path === 'logout' || path === 'invite') return out({ ok: true });
@@ -360,7 +359,7 @@ function vBuying() {
   }).join('');
   return `${vHead()}<section class="fade">
     <h1 class="title">Kupuję</h1>
-    <p class="sub">${res.length ? `${bought} z ${res.length} kupione · ` : ''}Tę listę widzisz tylko Ty.</p>
+    <p class="sub">${res.length ? `${bought} z ${res.length} kupione · ` : ''}Twoje zakupy. Organizator może je zobaczyć w trybie organizatora.</p>
     ${res.length ? groups : `<p class="empty mt">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a line" data-go="lists">Przejrzyj listy</button></div>`}
   </section>`;
 }
@@ -414,12 +413,12 @@ function vFamily() {
   if (S.famView === 'buyer') {
     resHtml = accounts.map(b => {
       const rs = A.reservations.filter(r => r.buyerId === b.id);
-      const hidden = A.hidden[b.id] || 0;
+      
       const you = b.id === me().id ? ' <span class="you">(Ty)</span>' : '';
-      if (!rs.length && !hidden) return `<div class="res-group"><h3>${esc(b.name)}${you}</h3><p class="empty">Nic jeszcze nie kupuje.</p></div>`;
+      if (!rs.length) return `<div class="res-group"><h3>${esc(b.name)}${you}</h3><p class="empty">Nic jeszcze nie kupuje.</p></div>`;
       return `<div class="res-group"><h3>${esc(b.name)}${you}<span>${rs.filter(r => r.purchased).length} z ${rs.length} kupione</span></h3>
         ${rs.map(r => resRow(r, `dla: ${name(r.ownerId)}`)).join('')}
-        ${hidden ? `<p class="empty">+ ${hidden} dla Ciebie — ukryte</p>` : ''}</div>`;
+        </div>`;
     }).join('');
   } else {
     resHtml = A.members.filter(m => m.id !== me().id).map(m => {
@@ -440,7 +439,7 @@ function vFamily() {
     const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
-        ${own ? '' : `<button class="a" data-act="person-link" data-id="${m.id}">Link do nowego hasła</button>`}
+        
         <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>`}
@@ -521,7 +520,7 @@ function vAuth() {
   const I = S.info || {};
   const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
       <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">`;
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">`;
   if (S.screen === 'register') return `${PUB()}<section class="auth fade">
     <h1 class="title">Załóż rodzinę</h1>
     <p class="sub">Zostajesz organizatorem: zapraszasz bliskich linkiem i możesz dodać osoby bez telefonu.</p>
@@ -538,7 +537,7 @@ function vAuth() {
     <form class="form" data-form="join">
       <input class="in" name="name" placeholder="Imię" maxlength="60" required autocomplete="given-name">
       <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Dołączam</button></div>
     </form>
   </section>`;
@@ -547,7 +546,7 @@ function vAuth() {
     <p class="sub">${I.needsEmail ? 'Ustaw e-mail i hasło — od teraz sam(a) prowadzisz swoją listę.' : 'Ustaw nowe hasło.'}</p>
     <form class="form" data-form="link">
       ${I.needsEmail ? '<input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">' : ''}
-      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
+      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
   </section>`;
@@ -699,7 +698,7 @@ document.addEventListener('click', e => {
       keys.forEach(k => { if (S.open.has(k) !== expand) toggleFold(k, true); });
       return syncAll(); }
     case 'menu': S.menu = !S.menu; $('.menu').classList.toggle('open', S.menu); t.setAttribute('aria-expanded', S.menu); return;
-    case 'theme': setTheme(isDark() ? 'light' : 'dark'); return render();
+    case 'theme': setTheme(isDark() ? 'light' : 'dark'); t.outerHTML = themeBtn(); return;
     case 'demo': return startDemo();
     case 'end-demo': return endDemo();
     case 'logout': if (S.demo) return endDemo(); return act(async () => { await api('logout', 'POST'); S.screen = 'landing'; history.replaceState(null, '', '#/'); }, null);
