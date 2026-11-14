@@ -62,7 +62,6 @@ const pl = (n, one, few, many) => n === 1 ? one : (n % 10 >= 2 && n % 10 <= 4 &&
 /* ---------- maile (Resend) ---------- */
 const MAIL_FROM = 'Mikołaj <listdo@mikolaja.pl>';
 const APP_URL = 'https://list.do.mikolaja.pl';
-const TEST_TO = 'j@walasek.xyz';   // tylko na ten adres idzie mail testowy
 const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
 const SERIF = "Georgia,'Times New Roman',serif";
@@ -294,18 +293,6 @@ export class FamilyStore extends DurableObject {
           foot: 'Link działa raz, przez 3 dni. Jeśli to nie Ty, po prostu zignoruj tę wiadomość.',
         });
       }
-      return json({ ok: true });
-    }
-    // Mail testowy — wyłącznie na stały adres właściciela, najwyżej 3 razy na dobę.
-    if (method === 'POST' && path === '/api/mail-test') {
-      this.rateLimit('mail-test:2', 3, 86400);
-      await sendMail(this.env, TEST_TO, {
-        subject: 'Mikołaj — test wysyłki', heading: 'Maile działają',
-        lines: ['To wiadomość testowa z list.do.mikolaja.pl. Tak będą wyglądać zaproszenia, nowe hasła i przypomnienie przed Wigilią.', 'Ania zaprasza Cię do rodziny Kowalskich — do wspólnych list do Mikołaja.'],
-        quote: 'w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!',
-        button: { label: 'Dołączam', url: APP_URL },
-        foot: 'Dostajesz tę wiadomość, bo testujemy wysyłkę.',
-      });
       return json({ ok: true });
     }
     // Wywołanie z harmonogramu (Worker blokuje /api/internal/ z zewnątrz).
