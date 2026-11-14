@@ -181,7 +181,9 @@ select.in:invalid { color: var(--faint); }
 .theme { display: grid; place-items: center; width: 36px; height: 36px; margin: -6px -8px -6px 0; color: var(--faint); border-radius: 50%; transition: color .2s; }
 .theme:hover { color: var(--ink); }
 .theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.mark { font: 400 22px/1 var(--serif); letter-spacing: -.01em; padding: 6px 0; }
+.mark { display: block; padding: 0; line-height: 0; }
+.mark img { display: block; width: 36px; height: 36px; border-radius: 4px; }
+.head.pub { align-items: center; }
 .landing { padding: 88px 0 48px; }
 .landing .label { margin: 96px 0 20px; }
 .landing .actions.mt { margin-top: 20px; }

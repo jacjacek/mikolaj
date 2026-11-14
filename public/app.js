@@ -515,7 +515,8 @@ function vEdit() {
   </section>`;
 }
 
-const PUB = () => `<div class="topbar"><header class="head pub"><button class="mark" data-go="landing">Mikołaj</button>${themeBtn()}</header></div>`;
+const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/favicon-96x96.png" alt="" width="36" height="36"></button>';
+const PUB = () => `<div class="topbar"><header class="head pub">${MARK}${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
   const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
@@ -577,7 +578,7 @@ function vLanding() {
   const d = daysToEve();
   const point = (h, t) => `<div class="point"><h3>${h}</h3><p>${t}</p></div>`;
   return `<div class="topbar"><header class="head pub">
-    <button class="mark" data-go="landing">Mikołaj</button>
+    ${MARK}
     <div class="right">${themeBtn()}<button class="a line" data-go="login">Zaloguj się</button></div>
   </header></div>
   <section class="landing fade">
