@@ -215,14 +215,14 @@ function vHead() {
   const tab = (s, label) => `<button data-go="${s}" ${S.screen === s ? 'aria-current="page"' : ''}>${label}</button>`;
   const until = god() ? new Date(me().adminUntil * 1000).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '';
   const mode = god() ? `<p class="demo-bar mode-bar">Tryb organizatora do ${until}: widzisz, kto co kupuje, i możesz zmieniać listy innych. <button data-act="admin-mode">Wyłącz</button></p>` : '';
-  return `${bar}${mode}<header class="head">
-    <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
+  return `<div class="topbar">${bar}${mode}<header class="head">
+    <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${myRes().length || S.screen === 'buying' ? tab('buying', 'Kupuję') : ''}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
     <div class="right">${themeBtn()}<button class="who" data-act="menu" aria-expanded="${S.menu}">${esc(me().name)}</button></div>
   </header>
   <div class="menu ${S.menu ? 'open' : ''}"><div>
     ${me().isAdmin ? `<button data-act="admin-mode">${god() ? 'Wyłącz tryb organizatora' : 'Tryb organizatora'}</button>` : ''}
     <button data-act="logout">Wyloguj</button>
-  </div></div>`;
+  </div></div></div>`;
 }
 
 function vGift(w) {
@@ -276,7 +276,8 @@ function vLists() {
           </div>` : ''}
           ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
         ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
-        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a" data-go="mine">Zmień list i życzenia</button></div>` : ''}`;
+        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień list i życzenia</button></div>` : ''}
+        <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">zwiń</button></p>`;
       return fold('p:' + p.id, 'person', head, body);
     }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
       ${me().isAdmin ? '<div class="actions mt"><button class="a solid" data-go="family">Zaproś bliskich</button></div>' : ''}`}
@@ -314,7 +315,7 @@ function ownerBlocks(ownerId) {
         <textarea class="in big" id="f-letter" maxlength="4000" placeholder="${own ? 'Drogi Mikołaju, w tym roku…' : `Napisz tak, jak ${esc(m.name)} by to powiedział(a)…`}">${esc(m.letter)}</textarea>
         <div class="actions"><button class="a solid" data-act="save-letter" data-owner="${ownerId}">Zapisz</button><button class="a quiet" data-act="cancel-letter">Anuluj</button></div></div>`
     : m.letter
-      ? `<p class="mine-letter"><span class="salut">Drogi Mikołaju,</span> ${esc(m.letter)}</p><div class="actions"><button class="a" data-act="edit-letter" data-owner="${ownerId}">Edytuj list</button></div>`
+      ? `<p class="mine-letter"><span class="salut">Drogi Mikołaju,</span> ${esc(m.letter)}</p><div class="actions"><button class="a line" data-act="edit-letter" data-owner="${ownerId}">Edytuj list</button></div>`
       : `<p class="empty">${own ? 'Nie masz jeszcze listu. Kilka zdań o tym, co lubisz, a czego nie.' : `${esc(m.name)} nie ma jeszcze listu. Możesz go spisać z rozmowy.`}</p>
          <div class="actions mt"><button class="a solid" data-act="edit-letter" data-owner="${ownerId}">Napisz list</button></div>`;
   // opiekun nie jest obdarowanym, więc widzi, co już ktoś kupuje — żeby nie dopisywać dubli
@@ -324,45 +325,64 @@ function ownerBlocks(ownerId) {
     ${byTier(ws, w => S.editWish === w.id ? wishForm(w, false) : `<div class="gift">
       <span class="t">${esc(w.title)}</span>
       ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
-      <div class="row"><span class="act"><button class="a" data-edit="${w.id}">Zmień</button>${stLine(w)}</span><span class="meta">${range(w)}${w.url ? `<span class="st lnk">${esc(host(w.url))}</span>` : ''}</span></div>
+      <div class="row"><span class="act"><button class="a line" data-edit="${w.id}">Zmień</button>${stLine(w)}</span><span class="meta">${range(w)}${w.url ? `<span class="st lnk">${esc(host(w.url))}</span>` : ''}</span></div>
     </div>`)}
     ${S.adding === ownerId ? wishForm({ title: '', note: '', url: '', tier: '', ownerId }, true)
       : `<div class="actions mt"><button class="a solid" data-act="add" data-owner="${ownerId}">${ws.length ? 'Dodaj życzenie' : 'Dodaj pierwsze życzenie'}</button></div>`}`;
-  const label = own ? ['List', 'Życzenia'] : [`${esc(m.name)} · list`, `${esc(m.name)} · życzenia`];
+  const label = ['List', 'Życzenia'];  // czyja to lista, mówi przyklejone imię nad sekcjami
   return fold(secKey('letter', ownerId), 'sec', `<h2>${label[0]}</h2>`, letterBody)
        + fold(secKey('wishes', ownerId), 'sec', `<h2>${label[1]}${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody);
 }
 
-function vMine() {
+// Kupuję — osobna zakładka: co wybrałem dla innych, pogrupowane według obdarowanych
+function vBuying() {
   const res = myRes();
   const bought = res.filter(w => w.purchased).length;
-  const managed = managedBy(me().id);
-  const buyingBody = res.length ? res.map(w => `<div class="gift ${w.purchased ? 'done' : ''}">
+  const item = w => `<div class="gift ${w.purchased ? 'done' : ''}">
       <span class="t">${esc(w.title)}</span>
-      <span class="n">dla: ${esc(member(w.ownerId)?.name)} · ${tier(w.tier).range}</span>
+      ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
       ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
-      <div class="row">
-        <button class="a ${w.purchased ? 'quiet' : ''}" data-act="buy" data-id="${w.id}">${w.purchased ? 'cofnij zakup' : 'Oznacz jako kupione'}</button>
-        <button class="a quiet" data-act="cancel" data-id="${w.id}">rezygnuję</button>
-        ${w.url ? `<a class="a quiet" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}
+      <div class="row"><span class="act">
+        <button class="a ${w.purchased ? 'quiet' : 'line'}" data-act="buy" data-id="${w.id}">${w.purchased ? 'cofnij zakup' : 'Oznacz jako kupione'}</button>
+        <button class="a quiet" data-act="cancel" data-id="${w.id}">rezygnuję</button></span>
+        <span class="meta">${range(w)}${w.url ? `<a class="a quiet lnk" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</span>
       </div>
-    </div>`).join('')
-    : `<p class="empty">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a" data-go="lists">Przejrzyj listy</button></div>`;
-  const buying = fold('s:buying', 'sec', `<h2>Kupuję${res.length ? ` · ${bought} z ${res.length} kupione` : ''}</h2>`, buyingBody);
+    </div>`;
+  const groups = S.data.members.filter(m => res.some(w => w.ownerId === m.id)).map(m => {
+    const ws = res.filter(w => w.ownerId === m.id);
+    return `<div class="managed">
+      <div class="managed-head">
+        <h2 class="managed-name stick">${esc(m.name)}</h2>
+        <p class="sub">${ws.filter(w => w.purchased).length} z ${ws.length} kupione</p>
+      </div>
+      <div class="managed-body">${byTier(ws, item)}</div>
+    </div>`;
+  }).join('');
+  return `${vHead()}<section class="fade">
+    <h1 class="title">Kupuję</h1>
+    <p class="sub">${res.length ? `${bought} z ${res.length} kupione · ` : ''}Tę listę widzisz tylko Ty.</p>
+    ${res.length ? groups : `<p class="empty mt">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a line" data-go="lists">Przejrzyj listy</button></div>`}
+  </section>`;
+}
 
-  const managedHtml = managed.map(m => `
+// Moje — mój list i życzenia oraz osoby, które prowadzę; każda osoba z przyklejonym imieniem
+function vMine() {
+  const managed = managedBy(me().id);
+  const block = (m, sub, extra = '') => `
     <div class="managed">
       <div class="managed-head">
-        <h2 class="managed-name">${esc(m.name)}</h2>
-        <p class="sub">Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.</p>
-        <div class="actions managed-actions">
-          <button class="a quiet" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
-          <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
-        </div>
-        ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}
+        <h2 class="managed-name stick">${esc(m.name)}</h2>
+        <p class="sub">${sub}</p>
+        ${extra}
       </div>
       <div class="managed-body">${ownerBlocks(m.id)}</div>
-    </div>`).join('');
+    </div>`;
+  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.', `
+        <div class="actions managed-actions">
+          <button class="a quiet" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
+          <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
+        </div>
+        ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}`)).join('');
 
   const addPerson = !me().canAdd ? '' : S.addingPerson
     ? `<div class="add-person"><div class="form">
@@ -371,17 +391,13 @@ function vMine() {
       </div></div>`
     : `<div class="add-person">
         <p class="sub">Dziecko bez telefonu albo ktoś, kto nie chce korzystać z aplikacji? Dodaj tę osobę i wpisuj list oraz życzenia za nią.</p>
-        <div class="actions mt"><button class="a" data-act="add-person">Dodaj osobę</button></div>
+        <div class="actions mt"><button class="a line" data-act="add-person">Dodaj osobę</button></div>
       </div>`;
 
-  // Kupuję na górze, gdy coś w niej jest; pusta sekcja ląduje na dole
   return `${vHead()}<section class="fade">
-    <h1 class="title">${esc(me().name)}</h1>
-    <p class="sub">To, co kupujesz innym, Twój list i życzenia${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
-    <div class="split ${res.length ? '' : 'later'}">
-      <aside class="split-side">${buying}</aside>
-      <div class="split-main">${ownerBlocks(me().id)}</div>
-    </div>
+    <h1 class="title">Moje</h1>
+    <p class="sub">Twój list i życzenia${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
+    <div class="own">${block(member(me().id), 'Twój list do Mikołaja i lista życzeń.')}</div>
     ${managedHtml}
     ${addPerson}
   </section>`;
@@ -421,7 +437,7 @@ function vFamily() {
     const meta = m.managedBy ? `bez konta · prowadzi ${name(m.managedBy)}`
       : [esc(m.email), m.isAdmin ? 'organizator' : '', m.canAdd ? 'może dodawać osoby' : ''].filter(Boolean).join(' · ');
     let actions = '';
-    const editBtn = own || !god() ? '' : `<button class="a" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
+    const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
         ${own ? '' : `<button class="a" data-act="person-link" data-id="${m.id}">Link do nowego hasła</button>`}
@@ -436,7 +452,7 @@ function vFamily() {
         <label class="sr" for="f-manager">Opiekun</label>
         <select class="in" id="f-manager">${accounts.map(a => `<option value="${a.id}" ${a.id === m.managedBy ? 'selected' : ''}>Prowadzi: ${esc(a.name)}</option>`).join('')}</select>
         <button class="a" data-act="save-manager" data-id="${m.id}">Zmień opiekuna</button>
-        <button class="a" data-act="person-link" data-id="${m.id}">Daj własne konto</button>
+        <button class="a" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>
       </div>
       ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `Zniknie list i życzenia: ${esc(m.name)}.`, 'Usuń') : ''}`;
@@ -450,7 +466,7 @@ function vFamily() {
   const tok = A.invite.split('=').pop();
   const who = A.locked ? `<h2 class="label">Kto co kupuje</h2>
     <p class="fam-text">Widać to tylko w trybie organizatora — żeby nikt przypadkiem nie zobaczył cudzych niespodzianek.</p>
-    <div class="actions mt"><button class="a" data-act="admin-mode">Włącz tryb organizatora</button></div>` : `<h2 class="label">Kto co kupuje</h2>
+    <div class="actions mt"><button class="a line" data-act="admin-mode">Włącz tryb organizatora</button></div>` : `<h2 class="label">Kto co kupuje</h2>
     <div class="filter">
       <button data-act="fam-view" data-v="for" aria-pressed="${S.famView !== 'buyer'}">dla kogo</button>
       <button data-act="fam-view" data-v="buyer" aria-pressed="${S.famView === 'buyer'}">kto kupuje</button>
@@ -466,15 +482,15 @@ function vFamily() {
     ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
     ${S.data.mail ? `<form class="form mt" data-form="invite-mail"><label class="sr" for="f-invite-mail">E-mail</label>
       <input class="in" id="f-invite-mail" name="email" type="email" placeholder="albo wyślij mailem — wpisz adres" required>
-      <div class="actions"><button class="a">Wyślij zaproszenie</button></div></form>` : ''}`;
+      <div class="actions"><button class="a line">Wyślij zaproszenie</button></div></form>` : ''}`;
   const addPeople = `<h2 class="label">Dodaj osoby</h2>
-    <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz dać im własne konto linkiem albo zmienić opiekuna.</p>
+    <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz przekazać komuś jego listę — dostanie link, ustawi e-mail i hasło i będzie ją prowadzić sam — albo zmienić opiekuna.</p>
     <div class="form"><label class="sr" for="f-people">Imiona</label>
       <textarea class="in" id="f-people" placeholder="${'Babcia Hela&#10;Dziadek Jurek&#10;Zosia'}"></textarea>
       <div class="actions"><button class="a solid" data-act="add-people">Dodaj osoby</button></div></div>`;
   const mode = `<h2 class="label">Tryb organizatora</h2>
     <p class="fam-text">Na wszelki wypadek: widzisz, kto co kupuje, zmieniasz listy i życzenia innych osób i przypisujesz za nich prezenty. Włącza się tylko w tej sesji i wyłącza sam po godzinie. Twojej listy nadal nie widzisz.</p>
-    <div class="actions mt">${god() ? '<button class="a" data-act="admin-mode">Wyłącz tryb organizatora</button>' : '<button class="a solid" data-act="admin-mode">Włącz na godzinę</button>'}</div>`;
+    <div class="actions mt">${god() ? '<button class="a line" data-act="admin-mode">Wyłącz tryb organizatora</button>' : '<button class="a solid" data-act="admin-mode">Włącz na godzinę</button>'}</div>`;
   return `${vHead()}<section class="fade">
     <h1 class="title">Rodzina</h1>
     <p class="sub">Tę zakładkę widzisz tylko Ty, bo jesteś organizatorem.</p>
@@ -499,7 +515,7 @@ function vEdit() {
   </section>`;
 }
 
-const PUB = () => `<header class="head pub"><button class="mark" data-go="landing">Mikołaj</button>${themeBtn()}</header>`;
+const PUB = () => `<div class="topbar"><header class="head pub"><button class="mark" data-go="landing">Mikołaj</button>${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
   const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
@@ -560,16 +576,16 @@ function vAuth() {
 function vLanding() {
   const d = daysToEve();
   const point = (h, t) => `<div class="point"><h3>${h}</h3><p>${t}</p></div>`;
-  return `<header class="head pub">
+  return `<div class="topbar"><header class="head pub">
     <button class="mark" data-go="landing">Mikołaj</button>
-    <div class="right">${themeBtn()}<button class="a" data-go="login">Zaloguj się</button></div>
-  </header>
+    <div class="right">${themeBtn()}<button class="a line" data-go="login">Zaloguj się</button></div>
+  </header></div>
   <section class="landing fade">
     <div class="hero-grid"><div>
     <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
     <p class="lead">Każdy pisze, czego by chciał. Bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego — a niespodzianka zostaje niespodzianką.</p>
     <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
-    <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-act="demo">Zobacz przykład</button></div>
+    <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-act="demo">Zobacz przykład</button></div>
     </div><p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p></div>
     <h2 class="label">Jak to działa</h2>
     <div class="points">
@@ -581,11 +597,11 @@ function vLanding() {
     <div class="start-grid"><div>
     <h2 class="label">Jak zacząć</h2>
     <p class="fam-text">Załóż rodzinę — zostajesz jej organizatorem. Potem wyślij bliskim link zaproszenia, a dziadków czy dzieci dodaj sam. Każda rodzina widzi tylko swoje listy.</p>
-    <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a" data-go="login">Mam już konto</button></div>
+    <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-go="login">Mam już konto</button></div>
     </div><div>
     <h2 class="label">Wypróbuj</h2>
     <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
-    <div class="actions mt"><button class="a" data-act="demo">Otwórz przykładową rodzinę</button></div>
+    <div class="actions mt"><button class="a line" data-act="demo">Otwórz przykładową rodzinę</button></div>
     </div></div>
   </section>`;
 }
@@ -596,7 +612,7 @@ function scheduleModeEnd() {
   clearTimeout(modeTimer);
   if (S.data?.user && god()) modeTimer = setTimeout(() => act(async () => {}, 'Tryb organizatora wyłączył się'), me().adminUntil * 1000 - Date.now() + 500);
 }
-const TABS = { lists: '#/', mine: '#/moje', family: '#/rodzina' };
+const TABS = { lists: '#/', buying: '#/kupuje', mine: '#/moje', family: '#/rodzina' };
 const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz', forgot: '#/haslo' };
 function render(animate = false) {
   const y = window.scrollY;
@@ -605,10 +621,11 @@ function render(animate = false) {
   if (!loggedIn && !['login', 'register', 'join', 'link', 'forgot'].includes(S.screen)) S.screen = 'landing';
   if ((S.screen === 'family' || S.screen === 'edit') && !me()?.isAdmin) S.screen = 'lists';
   scheduleModeEnd();
-  const view = !loggedIn ? vAuth() : { lists: vLists, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
+  const view = !loggedIn ? vAuth() : { lists: vLists, buying: vBuying, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
   $('#app').innerHTML = view;
   if (!animate) { $('.fade')?.classList.remove('fade'); window.scrollTo(0, y); }
   markFits();
+  syncTop();
   syncAll();
 }
 function go(screen) {
@@ -620,6 +637,10 @@ function go(screen) {
   if (screen === 'family') act(() => {});
 }
 // sekcje, które mieszczą się w podglądzie, nie potrzebują „Rozwiń”
+// wysokość przyklejonego paska u góry — inne przyklejone nagłówki stają tuż pod nim
+const topOffset = () => [...($('.topbar')?.children || [])].filter(e => !e.classList.contains('menu')).reduce((h, e) => h + e.offsetHeight, 0);
+function syncTop() { document.documentElement.style.setProperty('--top', topOffset() + 'px'); }
+addEventListener('resize', syncTop);
 function markFits() {
   document.querySelectorAll('.fold').forEach(f => {
     const limit = parseFloat(getComputedStyle(f).getPropertyValue('--peek'));
@@ -646,7 +667,7 @@ function toggleFold(key, bulk = false) {
     peek.addEventListener('transitionend', () => { if (S.open.has(key)) peek.style.maxHeight = ''; }, { once: true });
   } else {
     // nagłówek przyklejony w głębi listy — wróć do początku sekcji
-    const top = f.getBoundingClientRect().top;
+    const top = f.getBoundingClientRect().top - topOffset();
     if (top < 0 && !bulk) window.scrollBy(0, top);
     peek.style.maxHeight = peek.scrollHeight + 'px';
     peek.offsetHeight;
@@ -699,7 +720,7 @@ document.addEventListener('click', e => {
     case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
     // rezerwacje
-    case 'reserve': return act(() => api(`wishes/${id}/reserve`, 'POST'), 'Kupujesz to', () => api(`wishes/${id}/reserve`, 'DELETE'));
+    case 'reserve': return act(() => api(`wishes/${id}/reserve`, 'POST'), 'Kupujesz to — znajdziesz to w zakładce Kupuję', () => api(`wishes/${id}/reserve`, 'DELETE'));
     case 'buy': { const p = !wish(id).purchased; return act(() => api(`wishes/${id}/reserve`, 'PATCH', { purchased: p }), p ? 'Oznaczone jako kupione' : null); }
     case 'cancel': return act(() => api(`wishes/${id}/reserve`, 'DELETE'), 'Prezent znów jest wolny', () => api(`wishes/${id}/reserve`, 'POST'));
 
@@ -742,7 +763,7 @@ document.addEventListener('click', e => {
       const m = S.admin?.members.find(x => x.id === id) || member(id);
       return act(async () => {
         const { url } = await api(`members/${id}/link`, 'POST');
-        await copy(url, m.managedBy ? `Link skopiowany — ${m.name} ustawi w nim e-mail i hasło (ważny 3 dni)` : `Link dla ${m.name} skopiowany. Działa raz, przez 3 dni.`);
+        await copy(url, m.managedBy ? `Link skopiowany. Wyślij go: ${m.name} ustawi e-mail i hasło i od tej pory sam(a) prowadzi swoją listę. Link działa 3 dni.` : `Link dla ${m.name} skopiowany. Działa raz, przez 3 dni.`);
       }); }
 
     // organizator

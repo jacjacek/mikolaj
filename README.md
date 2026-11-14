@@ -5,7 +5,8 @@ Prywatne, rodzinne listy do Świętego Mikołaja. Każdy może założyć własn
 ## Jak działa
 
 - **Listy** — rozwijane osoby z listem i życzeniami (od najtańszych), „Kupię to” rezerwuje prezent.
-- **Moje** — co kupuję, mój list i życzenia, a także osoby, które prowadzę (dziecko bez telefonu, dziadkowie). Opiekun pisze za nie list i życzenia; prezenty dla innych rezerwuje na swoim koncie. Może dać takiej osobie własne konto jednorazowym linkiem.
+- **Kupuję** — prezenty, które wybrałem dla innych, pogrupowane według obdarowanych; odhaczanie kupionych.
+- **Moje** — mój list i życzenia, a także osoby, które prowadzę (dziecko bez telefonu, dziadkowie). Opiekun pisze za nie list i życzenia; prezenty dla innych rezerwuje na swoim koncie. Może przekazać tej osobie jej listę jednorazowym linkiem (ustawia e-mail i hasło).
 - **Rodzina** (tylko organizator) — kto co komu kupuje (bez listy organizatora), link zaproszenia, osoby: link do nowego hasła, uprawnienie do dodawania osób, zmiana opiekuna, przekazanie roli, usuwanie.
 - **Tryb organizatora** — włączany ręcznie, tylko w bieżącej sesji i na godzinę (pilnuje tego serwer): organizator edytuje listy i życzenia innych i przypisuje za nich prezenty. Jego własna lista dalej jest przed nim ukryta. W zakładce Rodzina można też hurtowo dodać osoby bez konta.
 - Życzenia mają przedział budżetowy zamiast ceny: Drobnostki (do 50 zł), Nie było niegrzecznie (50–200 zł), To był grzeczny rok (200–300 zł), Byłem aniołkiem (bez limitu).

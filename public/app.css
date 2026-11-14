@@ -24,14 +24,21 @@ button[disabled] { opacity: .5; cursor: default; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } }
 
 /* nagłówek */
-.head { display: flex; justify-content: space-between; align-items: baseline; padding-top: max(28px, env(safe-area-inset-top)); margin-bottom: 44px; }
-@media (min-width: 700px) { .head, .auth { padding-top: 64px; } }
-.nav { display: flex; gap: 22px; }
+:root { --top: 0px; }
+/* przyklejony pasek: zakładki, motyw, imię (i ewentualnie pasek demo / trybu organizatora) */
+.topbar { position: sticky; top: 0; z-index: 10; background: var(--bg); margin: 0 calc(-1 * var(--pad)); padding: 0 var(--pad); }
+.head { display: flex; justify-content: space-between; align-items: baseline; padding: max(14px, env(safe-area-inset-top)) 0 12px; }
+.topbar + section { margin-top: 32px; }
+@media (min-width: 700px) { .head { padding-top: 22px; } .topbar + section { margin-top: 48px; } }
+.nav { display: flex; gap: 18px; }
+.who { max-width: 7em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.own > .managed, .title + .sub + .managed { margin-top: 40px; }
 .nav button, .who { font-size: 15px; color: var(--faint); padding: 6px 0; transition: color .2s; }
 .nav button[aria-current="page"] { color: var(--ink); }
-.menu { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease); margin: -36px 0 36px; }
+.menu { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .3s var(--ease); }
 .menu.open { grid-template-rows: 1fr; }
 .menu > div { overflow: hidden; display: flex; gap: 22px; justify-content: flex-end; }
+.menu.open > div { padding-bottom: 10px; }
 .menu button { color: var(--soft); font-size: 14px; padding: 4px 0; }
 
 .title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
@@ -39,7 +46,15 @@ button[disabled] { opacity: .5; cursor: default; }
 .title { font: 400 44px/1.02 var(--serif); letter-spacing: -.02em; margin: 0 0 8px; }
 .sub { color: var(--faint); font-size: 14px; margin: 0; }
 .nudge { margin: 28px 0 0; color: var(--soft); font-size: 15px; }
-.nudge button, .a, .more, .fold-head .toggle, .more-txt { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.nudge button, .a, .more, .fold-head .toggle, .more-txt, .demo-bar button, .nav button, .who, .menu button {
+  color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 25%, transparent); transition: text-decoration-color .15s, color .15s, opacity .15s, background .15s;
+}
+.nudge button:hover, .a:hover, .more:hover, .fold-head .toggle:hover, .more-txt:hover, .demo-bar button:hover, .nav button:hover, .who:hover, .menu button:hover { text-decoration-color: currentColor; }
+.nav button, .who { color: var(--faint); text-underline-offset: 5px; }
+.menu button { color: var(--soft); }
+.nav button:hover, .who:hover, .menu button:hover { color: var(--ink); }
+.nav button[aria-current="page"] { color: var(--ink); text-decoration-color: currentColor; }  /* bieżąca zakładka: pełna kreska */
 .people { margin-top: 36px; }
 .mt { margin-top: 12px; }
 .push { margin-left: auto; }
@@ -48,11 +63,14 @@ button[disabled] { opacity: .5; cursor: default; }
    rozwinięte mają nagłówek przyklejony u góry (tylko w obrębie sekcji) z „Zwiń”. */
 .fold { position: relative; }
 .fold-head {
-  position: relative; top: 0; z-index: 3; background: var(--bg);
+  position: relative; z-index: 3; background: var(--bg);
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
   margin: 0 calc(-1 * var(--pad)); padding: 12px var(--pad) 10px;
 }
-.fold.open > .fold-head { position: sticky; }
+.person > .fold-head { position: sticky; top: var(--top); }  /* imię przykleja się także przy zwiniętej liście */
+/* Moje: przykleja się duże imię (moje albo prowadzonej osoby), nie etykiety sekcji */
+@media (max-width: 1099px) { .managed-head { display: contents; } }  /* imię przykleja się w obrębie całego bloku osoby */
+.title.stick, .managed-name.stick { position: sticky; top: var(--top); z-index: 5; background: var(--bg); margin-left: calc(-1 * var(--pad)); margin-right: calc(-1 * var(--pad)); padding: 10px var(--pad) 12px; }
 .fold-head > :first-child { margin-right: auto; }
 .fold-head .toggle { font-size: 15px; padding: 6px 0; white-space: nowrap; }
 .fold:not(.open) .fold-head .toggle, .fold.fits .fold-head .toggle { display: none; }
@@ -65,12 +83,15 @@ button[disabled] { opacity: .5; cursor: default; }
 .more { display: block; margin: 4px 0 0; font-size: 15px; padding: 6px 0; }
 .fold.open > .more, .fold.fits > .more { display: none; }
 
-.person { --peek: 60px; --fade: 32px; margin-bottom: 30px; }
+.person { --peek: 60px; --fade: 32px; margin-bottom: 56px; }
+.person.open { margin-bottom: 80px; }
 .person .name { font: 400 32px/1.15 var(--serif); letter-spacing: -.015em; }
 .person .name small { display: block; font: 400 13.5px/1.3 var(--sans); color: var(--faint); margin-top: 2px; }
 .person .count { font-size: 14px; color: var(--faint); white-space: nowrap; }
 .person .peek-inner { padding: 2px 0 14px; }
-.sec { --peek: 330px; --fade: 80px; margin-top: 44px; }
+.end { margin: 22px 0 0; font-size: 14px; color: var(--faint); }
+.fold.fits .end { display: none; }
+.sec { --peek: 420px; --fade: 80px; margin-top: 44px; }
 .sec .fold-head { padding-top: 10px; }
 .sec .fold-head h2 { font-size: 13px; font-weight: 400; color: var(--faint); margin: 0; }
 .sec .fold-head .toggle { font-size: 14px; }
@@ -89,9 +110,14 @@ button[disabled] { opacity: .5; cursor: default; }
 .gift .act, .gift .meta { display: contents; }
 .gift.taken .t, .gift.taken .n { color: var(--faint); }
 .gift.done .t { text-decoration: line-through; text-decoration-thickness: 1px; color: var(--faint); }
+/* hierarchia: wypełniony (główna akcja) → obrys (druga) → podkreślenie (reszta) */
 .a { padding: 4px 0; }
-.a.quiet { color: var(--soft); text-decoration: none; }
-.a.solid { text-decoration: none; background: var(--ink); color: var(--bg); padding: 5px 10px; border-radius: 4px; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.a.quiet { color: var(--soft); }
+.a.solid, .a.line { text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 14px; font-weight: 500; line-height: 1.4; }
+.a.solid { background: var(--ink); color: var(--bg); }
+.a.solid:hover { opacity: .85; }
+.a.line { color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 30%, transparent); }
+.a.line:hover { box-shadow: inset 0 0 0 1px var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .changed { grid-column: 1 / -1; color: var(--soft); font: italic 400 15px/1.5 var(--serif); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px 22px; align-items: baseline; font-size: 15px; }
 .empty { color: var(--faint); font-size: 15px; padding: 6px 0; margin: 0; }
@@ -149,8 +175,7 @@ select.in:invalid { color: var(--faint); }
 
 /* strona startowa */
 .demo-bar { margin: 0; padding: 10px 0 0; font-size: 13px; color: var(--faint); }
-.demo-bar button { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.demo-bar + .head { padding-top: 18px; }
+.demo-bar + .head, .demo-bar + .demo-bar { padding-top: 10px; }
 .head.pub { margin-bottom: 0; }
 .head .right { display: flex; align-items: center; gap: 14px; }
 .theme { display: grid; place-items: center; width: 36px; height: 36px; margin: -6px -8px -6px 0; color: var(--faint); border-radius: 50%; transition: color .2s; }
@@ -170,7 +195,9 @@ select.in:invalid { color: var(--faint); }
 .point h3 { font: 400 22px/1.25 var(--serif); margin: 0 0 6px; }
 .point p { margin: 0; color: var(--soft); font-size: 15px; max-width: 28em; }
 .auth .title { margin-bottom: 8px; }
-.head.pub + .auth { min-height: 70vh; padding-top: 0; }
+.topbar + .auth { min-height: 70vh; padding-top: 0; margin-top: 0; }
+.topbar + .landing { margin-top: 0; }
+.fold, .managed, .stick { scroll-margin-top: var(--top); }
 
 /* układy dwukolumnowe — na telefonie zwykły stos */
 .split { display: flex; flex-direction: column; }
@@ -182,17 +209,17 @@ select.in:invalid { color: var(--faint); }
 @media (min-width: 1100px) {
   :root { --pad: 48px; }
   #app { max-width: 1180px; }
-  .head { margin-bottom: 64px; }
+  .topbar + section { margin-top: 64px; }
   .title { font-size: 56px; }
 
   /* wszystko rozwinięte — szerokość pozwala, a imię po lewej mówi, czyja to lista */
   .fold > .peek { max-height: none; -webkit-mask-image: none; mask-image: none; }
-  .fold > .more, .fold-head .toggle, [data-act="toggle-all"] { display: none; }
+  .fold > .more, .fold-head .toggle, [data-act="toggle-all"], .end { display: none; }
 
   /* Listy: imię przyklejone w lewej kolumnie, dopóki trwa jego lista */
   .people { margin-top: 64px; }
-  .person { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: 72px; margin-bottom: 88px; }
-  .person > .fold-head { position: sticky; top: 0; align-self: start; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0; padding: 28px 0 12px; background: transparent; }
+  .person, .person.open { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: 72px; margin-bottom: 144px; }
+  .person > .fold-head { position: sticky; top: var(--top); align-self: start; flex-direction: column; align-items: flex-start; gap: 6px; margin: 0; padding: 28px 0 12px; background: transparent; }
   .person .name { font-size: 40px; cursor: default; }
   .person > .peek { padding-top: 34px; }
   .letter { font-size: 19px; max-width: 38em; }
@@ -212,7 +239,7 @@ select.in:invalid { color: var(--faint); }
 
   /* Moje i Rodzina: dwie kolumny */
   .split { display: grid; grid-template-columns: 360px minmax(0, 1fr); column-gap: 88px; align-items: start; }
-  .split > .split-side { order: 0; position: sticky; top: 24px; }
+  .split > .split-side { order: 0; }
   .split { margin-top: 56px; }
   /* w wąskiej kolumnie prezent zostaje w układzie pionowym */
   .split-side .gift { grid-template-columns: minmax(0, 1fr); }
@@ -222,8 +249,10 @@ select.in:invalid { color: var(--faint); }
   .fam-split > .split-side { order: 0; position: static; }
   .split .sec:first-child, .split .label:first-child { margin-top: 0; }
   .sec > .fold-head { position: static; margin: 0; padding: 0 0 10px; }
+  .managed-name.stick { position: static; margin: 0 0 6px; padding: 0; background: none; }  /* na komputerze przykleja się cała lewa kolumna z imieniem */
   .managed { display: grid; grid-template-columns: 300px minmax(0, 1fr); column-gap: 72px; align-items: start; margin-top: 112px; }
-  .managed-head { position: sticky; top: 24px; }
+  .managed-head { position: sticky; top: calc(var(--top) + 24px); }
+  .own > .managed, .title + .sub + .managed { margin-top: 64px; }
   .managed-name { font-size: 40px; }
   .managed-body .sec:first-child { margin-top: 0; }
   .add-person { margin-top: 112px; max-width: 30em; }
