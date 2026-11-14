@@ -60,10 +60,11 @@ No e-mail ever reveals who is buying what for whom.
 
 ```
 public/            frontend — plain HTML, CSS and ES-module JavaScript, no build step
-  index.html
+  index.html       includes the pre-rendered landing page, so it paints before any JavaScript
   app.css
   app.js
-  *.png, favicon.ico, site.webmanifest   icons and web-app manifest
+  *.woff2          self-hosted Inter and Newsreader, subset to Latin + Polish
+  *.png, *.webp, favicon.ico, site.webmanifest   icons and web-app manifest
 src/worker.js      Cloudflare Worker + one SQLite-backed Durable Object (FamilyStore)
 scripts/
   deploy.py              uploads the sources to the existing Worker via the Cloudflare API
@@ -72,7 +73,7 @@ scripts/
 .github/workflows/deploy.yml   push to master → check → upload → verify
 ```
 
-- **No dependencies and no bundler.** The Worker imports the frontend files directly; images are uploaded as data modules.
+- **No dependencies and no bundler.** The Worker imports the frontend files directly; images and fonts are uploaded as data modules. Icons and fonts are cached for a year, so a changed file needs a new name.
 - **One API call for the whole UI.** `GET /api/state` returns everything the signed-in person may see, already trimmed by the server; the client re-renders from it after each action.
 - **Many families, one store.** All families live in one Durable Object, every query is scoped by family, and families never see each other.
 - **Additive migrations.** Schema changes run at start-up and only add columns or tables; existing data is never removed.

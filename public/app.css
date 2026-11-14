@@ -1,5 +1,10 @@
+/* fonty u siebie: podzbiór łaciński z polskimi znakami (Inter 400–500, Newsreader 400 z osią opsz) */
+@font-face { font-family: "Inter"; src: url(/inter.woff2) format("woff2"); font-weight: 400 500; font-style: normal; font-display: swap; }
+@font-face { font-family: "Newsreader"; src: url(/newsreader.woff2) format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Newsreader"; src: url(/newsreader-italic.woff2) format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+
 :root {
-  --bg: #fff; --ink: #262626; --soft: #6b6b6b; --faint: #8c8c8c; --field: #f4f4f4;
+  --bg: #fff; --ink: #262626; --soft: #6b6b6b; --faint: #767676; --field: #f4f4f4;
   --serif: "Newsreader", Georgia, serif;
   --sans: "Inter", system-ui, -apple-system, sans-serif;
   --ease: cubic-bezier(.2,.7,.2,1);
@@ -7,9 +12,9 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #161616; --ink: #ececec; --soft: #a0a0a0; --faint: #7a7a7a; --field: #222; color-scheme: dark; }
+  :root:not([data-theme="light"]) { --bg: #161616; --ink: #ececec; --soft: #a0a0a0; --faint: #8a8a8a; --field: #222; color-scheme: dark; }
 }
-:root[data-theme="dark"] { --bg: #161616; --ink: #ececec; --soft: #a0a0a0; --faint: #7a7a7a; --field: #222; color-scheme: dark; }
+:root[data-theme="dark"] { --bg: #161616; --ink: #ececec; --soft: #a0a0a0; --faint: #8a8a8a; --field: #222; color-scheme: dark; }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -20,6 +25,8 @@ button[disabled] { opacity: .5; cursor: default; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 #app { max-width: 560px; margin: 0 auto; padding: 0 var(--pad) 96px; min-height: 100vh; }
+/* gotowa strona startowa z index.html — ukryta, gdy adres prowadzi do innego ekranu */
+.deep #app.pre { visibility: hidden; }
 .fade { animation: fade .35s var(--ease) both; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } }
 
@@ -180,6 +187,13 @@ select.in:invalid { color: var(--faint); }
 .head .right { display: flex; align-items: center; gap: 14px; }
 .theme { display: grid; place-items: center; width: 36px; height: 36px; margin: -6px -8px -6px 0; color: var(--faint); border-radius: 50%; transition: color .2s; }
 .theme:hover { color: var(--ink); }
+.theme .sun { display: none; }
+:root[data-theme="dark"] .theme .sun { display: block; }
+:root[data-theme="dark"] .theme .moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme .sun { display: block; }
+  :root:not([data-theme="light"]) .theme .moon { display: none; }
+}
 .theme svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mark { display: block; padding: 0; line-height: 0; }
 .mark img { display: block; width: 36px; height: 36px; border-radius: 4px; }
