@@ -2,7 +2,20 @@ import { DurableObject } from 'cloudflare:workers';
 import html from '../public/index.html';
 import css from '../public/app.css';
 import app from '../public/app.js';
-import favicon from '../public/favicon.svg';
+import manifest from '../public/site.webmanifest';
+// Ikony: binarne moduły danych (ArrayBuffer).
+import faviconIco from '../public/favicon.ico';
+import favicon16 from '../public/favicon-16x16.png';
+import favicon32 from '../public/favicon-32x32.png';
+import favicon48 from '../public/favicon-48x48.png';
+import favicon96 from '../public/favicon-96x96.png';
+import touch from '../public/apple-touch-icon.png';
+import touch120 from '../public/apple-touch-icon-120x120.png';
+import touch152 from '../public/apple-touch-icon-152x152.png';
+import touch167 from '../public/apple-touch-icon-167x167.png';
+import icon192 from '../public/icon-192x192.png';
+import icon512 from '../public/icon-512x512.png';
+import iconMaskable from '../public/icon-maskable-512x512.png';
 
 const encoder = new TextEncoder();
 const SESSION_AGE = 60 * 60 * 24 * 30;
@@ -536,12 +549,26 @@ export default {
       '/': [html, 'text/html; charset=utf-8'],
       '/app.css': [css, 'text/css; charset=utf-8'],
       '/app.js': [app, 'application/javascript; charset=utf-8'],
-      '/favicon.svg': [favicon, 'image/svg+xml'],
+      '/site.webmanifest': [manifest, 'application/manifest+json'],
+      '/favicon.ico': [faviconIco, 'image/x-icon'],
+      '/favicon-16x16.png': [favicon16, 'image/png'],
+      '/favicon-32x32.png': [favicon32, 'image/png'],
+      '/favicon-48x48.png': [favicon48, 'image/png'],
+      '/favicon-96x96.png': [favicon96, 'image/png'],
+      '/apple-touch-icon.png': [touch, 'image/png'],
+      '/apple-touch-icon-precomposed.png': [touch, 'image/png'],
+      '/apple-touch-icon-120x120.png': [touch120, 'image/png'],
+      '/apple-touch-icon-152x152.png': [touch152, 'image/png'],
+      '/apple-touch-icon-167x167.png': [touch167, 'image/png'],
+      '/icon-192x192.png': [icon192, 'image/png'],
+      '/icon-512x512.png': [icon512, 'image/png'],
+      '/icon-maskable-512x512.png': [iconMaskable, 'image/png'],
       '/robots.txt': ['User-agent: *\nDisallow: /\n', 'text/plain; charset=utf-8'],
     };
     const asset = assets[url.pathname];
     if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
-    const headers = { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': 'no-cache' };
+    // ikony mogą leżeć w pamięci przeglądarki dzień; kod i HTML zawsze sprawdzane na nowo
+    const headers = { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': asset[1].startsWith('image/') ? 'public, max-age=86400' : 'no-cache' };
     if (asset[0] === html && request.method === 'GET') {
       // Nonce na odpowiedź — Cloudflare może wstrzyknąć swój skrypt bez 'unsafe-inline'.
       const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));

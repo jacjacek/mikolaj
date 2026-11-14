@@ -55,7 +55,7 @@ def verify(base, revision, branch):
     status, headers, body = fetch(base, '/version.json')
     assert status == 200 and json.loads(body) == {'revision': revision, 'branch': branch}, 'Revision has not propagated yet'
     assert 'no-store' in headers.get('Cache-Control', ''), 'Revision endpoint must not be cached'
-    for name in ['app.css', 'app.js', 'favicon.svg']:
+    for name in sorted(p.name for p in (ROOT / 'public').iterdir() if p.is_file() and p.name != 'index.html'):
         status, _, body = fetch(base, '/' + name)
         assert status == 200 and body == (ROOT / 'public' / name).read_bytes(), 'Source mismatch: ' + name
     status, headers, body = fetch(base, '/')

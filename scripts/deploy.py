@@ -142,8 +142,11 @@ def main():
     if not exists:
         metadata['migrations'] = {'new_tag': 'v1', 'steps': [{'new_sqlite_classes': ['FamilyStore']}]}
     parts = [('metadata', 'application/json', json.dumps(metadata).encode()), ('src/worker.js', 'application/javascript+module', (ROOT / 'src/worker.js').read_bytes())]
-    for file in ['index.html', 'app.css', 'app.js', 'favicon.svg']:
-        parts.append(('public/' + file, 'text/plain', (ROOT / 'public' / file).read_bytes()))
+    # Każdy plik z public/: tekst jako moduł tekstowy, obrazy jako moduł danych (ArrayBuffer).
+    for path in sorted((ROOT / 'public').iterdir()):
+        if path.is_file():
+            binary = path.suffix in ('.png', '.ico')
+            parts.append(('public/' + path.name, 'application/octet-stream' if binary else 'text/plain', path.read_bytes()))
     payload, content_type = multipart(parts)
     deployed = api(prefix + f'/scripts/{name}', 'PUT', raw=payload, content_type=content_type)
     # Ustawienia bywają przez chwilę nieaktualne tuż po wgraniu — odczytaj ponownie.
