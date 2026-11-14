@@ -147,7 +147,7 @@ await check('One account in several families with separate roles', async () => {
   assert.equal((await f.call('switch','POST',{memberId:b.id},a.cookie)).status,404);
   // drugi raz to samo zaproszenie nie tworzy duplikatu
   assert.equal((await f.call('families/join','POST',{inviteToken:invite},a.cookie)).body.already,true);
-  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM members WHERE account_id=?').get(a.id).n,2);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM members WHERE account_id=(SELECT account_id FROM members WHERE id=?)').get(a.id).n,2);
 });
 await check('Families of one account stay isolated', async () => {
   const f=fixture(), a=await f.register('A'), b=await f.register('B'), w=await f.addWish(b);

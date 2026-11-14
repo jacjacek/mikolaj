@@ -213,13 +213,18 @@ function vHead() {
   const bar = S.demo ? `<p class="demo-bar">Przykładowa rodzina — zmiany znikną po odświeżeniu. <button data-act="end-demo">Wyjdź z demo</button></p>` : '';
   const tab = (s, label) => `<button data-go="${s}" ${S.screen === s ? 'aria-current="page"' : ''}>${label}</button>`;
   const until = god() ? new Date(me().adminUntil * 1000).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) : '';
+  const fams = S.data.families || [];
   const mode = god() ? `<p class="demo-bar mode-bar">Tryb organizatora do ${until}: widzisz, kto co kupuje, i możesz zmieniać listy innych. <button data-act="admin-mode">Wyłącz</button></p>` : '';
   return `<div class="topbar">${bar}${mode}<header class="head">
     <nav class="nav" aria-label="Nawigacja">${tab('lists', 'Listy')}${myRes().length || S.screen === 'buying' ? tab('buying', 'Kupuję') : ''}${tab('mine', 'Moje')}${me().isAdmin ? tab('family', 'Rodzina') : ''}</nav>
     <div class="right">${themeBtn()}<button class="who" data-act="menu" aria-expanded="${S.menu}">${esc(me().name)}</button></div>
   </header>
   <div class="menu ${S.menu ? 'open' : ''}"><div>
+    ${fams.length > 1 ? `<div class="fams" aria-label="Twoje rodziny">${fams.map(f => f.memberId === me().id
+      ? `<button aria-current="true">${esc(f.name)}${f.isAdmin ? '<small>organizator</small>' : ''}</button>`
+      : `<button data-act="switch" data-id="${f.memberId}">${esc(f.name)}${f.isAdmin ? '<small>organizator</small>' : ''}</button>`).join('')}</div>` : ''}
     ${me().isAdmin ? `<button data-act="admin-mode">${god() ? 'Wyłącz tryb organizatora' : 'Tryb organizatora'}</button>` : ''}
+    ${S.demo ? '' : '<button data-go="newfam">Nowa rodzina</button>'}
     <button data-act="logout">Wyloguj</button>
   </div></div></div>`;
 }
@@ -502,6 +507,23 @@ function vFamily() {
   </section>`;
 }
 
+// kolejna rodzina na tym samym koncie: nowa albo z zaproszenia
+function vNewFamily() {
+  const join = S.screen === 'joinfam', I = S.info || {};
+  return `${vHead()}<section class="auth fade">
+    <h1 class="title">${join ? 'Zaproszenie' : 'Nowa rodzina'}</h1>
+    <p class="sub">${join
+      ? `${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodziny ${esc(I.familyName)}. Dołączysz tym samym kontem — w każdej rodzinie masz osobny list i życzenia, a między rodzinami przełączasz się pod swoim imieniem.`
+      : 'Zostajesz jej organizatorem. Obecne rodziny zostają — przełączasz się między nimi pod swoim imieniem.'}</p>
+    <form class="form" data-form="${S.screen}">
+      ${join ? '' : '<input class="in" name="familyName" placeholder="Nazwa rodziny, np. Kowalscy" maxlength="80" required>'}
+      <label class="sr" for="f-fam-name">Imię w tej rodzinie</label>
+      <input class="in" id="f-fam-name" name="name" value="${esc(me().name)}" placeholder="Twoje imię w tej rodzinie" maxlength="60" required autocomplete="given-name">
+      <div class="actions"><button class="a solid">${join ? 'Dołączam' : 'Załóż rodzinę'}</button><button type="button" class="a quiet" data-act="cancel-fam">Anuluj</button></div>
+    </form>
+  </section>`;
+}
+
 // organizator w swoim trybie edytuje listę innej osoby
 function vEdit() {
   const m = member(S.editOwner);
@@ -540,6 +562,7 @@ function vAuth() {
       <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Dołączam</button></div>
     </form>
+    <p class="foot">Masz już konto w innej rodzinie? Wpisz ten sam e-mail i hasło — dołączysz tym samym kontem.</p>
   </section>`;
   if (S.screen === 'link') return `<section class="auth fade">
     <h1 class="title">Cześć, ${esc(I.name)}</h1>
@@ -549,6 +572,7 @@ function vAuth() {
       <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
+    ${I.needsEmail ? '<p class="foot">Masz już konto w innej rodzinie? Wpisz ten sam e-mail i hasło — lista dołączy do Twojego konta.</p>' : ''}
   </section>`;
   if (S.screen === 'forgot') return `${PUB()}<section class="auth fade">
     <h1 class="title">Nowe hasło</h1>
@@ -595,11 +619,12 @@ const PUBLIC = { landing: '#/', login: '#/zaloguj', register: '#/zaloz', forgot:
 function render(animate = false) {
   const y = window.scrollY;
   const loggedIn = S.data?.user;
-  if (loggedIn && !TABS[S.screen] && S.screen !== 'edit') S.screen = 'lists';
+  if (loggedIn && !TABS[S.screen] && !['edit', 'newfam', 'joinfam'].includes(S.screen)) S.screen = 'lists';
+  if (S.screen === 'joinfam' && !S.token) S.screen = 'lists';
   if (!loggedIn && !['login', 'register', 'join', 'link', 'forgot'].includes(S.screen)) S.screen = 'landing';
   if ((S.screen === 'family' || S.screen === 'edit') && !me()?.isAdmin) S.screen = 'lists';
   scheduleModeEnd();
-  const view = !loggedIn ? vAuth() : { lists: vLists, buying: vBuying, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
+  const view = !loggedIn ? vAuth() : { lists: vLists, buying: vBuying, mine: vMine, family: vFamily, edit: vEdit, newfam: vNewFamily, joinfam: vNewFamily }[S.screen]();
   const el = $('#app');
   if (el.classList.contains('pre')) {
     // pierwszy render: gotowa strona startowa już widać — bez ponownego wjazdu
@@ -613,6 +638,13 @@ function render(animate = false) {
   markFits();
   syncTop();
   syncAll();
+}
+// po przełączeniu rodziny: czysty stan widoku
+function enterFamily(screen = 'lists') {
+  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null, filter: {}, admin: null });
+  S.open.clear();
+  history.replaceState(null, '', TABS[screen]);
+  window.scrollTo(0, 0);
 }
 function go(screen) {
   Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null });
@@ -703,6 +735,10 @@ document.addEventListener('click', e => {
     case 'end-demo': return endDemo();
     case 'logout': if (S.demo) return endDemo(); return act(async () => { await api('logout', 'POST'); S.screen = 'landing'; history.replaceState(null, '', '#/'); }, null);
     case 'confirm-cancel': S.confirm = null; return render();
+    case 'switch': {
+      const f = (S.data.families || []).find(x => x.memberId === id);
+      return act(async () => { await api('switch', 'POST', { memberId: id }); enterFamily(); }, f ? `Rodzina: ${f.name}` : null); }
+    case 'cancel-fam': S.token = null; S.info = null; return go('lists');
     case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
     // rezerwacje
@@ -789,6 +825,10 @@ document.addEventListener('submit', e => {
   const form = e.target, body = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
   if (kind === 'invite-mail') return act(() => api('invite/email', 'POST', body), `Zaproszenie wysłane na ${body.email}`);
+  if (kind === 'newfam' || kind === 'joinfam') return act(async () => {
+    const r = await api(kind === 'newfam' ? 'families' : 'families/join', 'POST', kind === 'newfam' ? body : { ...body, inviteToken: S.token });
+    S.token = null; S.info = null; enterFamily(kind === 'newfam' ? 'family' : r.already ? 'lists' : 'mine');
+  }, kind === 'newfam' ? 'Rodzina założona. Skopiuj link zaproszenia i wyślij go bliskim.' : 'Jesteś w nowej rodzinie');
   if (kind === 'forgot') return act(async () => { await api('forgot', 'POST', body); S.screen = 'login'; history.replaceState(null, '', PUBLIC.login); },
     'Jeśli konto istnieje, wysłaliśmy link. Sprawdź skrzynkę — także spam.');
   act(async () => {
@@ -828,8 +868,9 @@ async function start() {
     S.screen = Object.keys(PUBLIC).find(k => k !== 'landing' && PUBLIC[k] === hash) || Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
   }
   try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message); }
-  // Zalogowany, ale otwiera link? Najpierw link — po zapisaniu wraca do aplikacji.
-  if (S.token && S.data.user) S.data = { user: null };
+  // Zalogowany z zaproszeniem — dołącza tym samym kontem. Z linkiem do hasła/listy — najpierw link.
+  if (S.token && S.data.user && S.screen === 'join') S.screen = 'joinfam';
+  else if (S.token && S.data.user) S.data = { user: null };
   render(true);
   if (S.screen === 'family' && S.data.user) act(() => {});
 }
