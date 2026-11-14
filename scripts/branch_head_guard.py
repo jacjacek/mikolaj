@@ -19,7 +19,7 @@ def validate(repository, ref, revision):
     if (not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9_.-]{1,100}', repository)
             or repository.split('/')[-1] in {'.', '..'}):
         raise ValueError('Invalid GitHub repository')
-    if ref not in {'refs/heads/master', 'refs/heads/develop'}:
+    if ref != 'refs/heads/master':
         raise ValueError('Only exact deployment branch refs are permitted')
     if not re.fullmatch(r'[0-9a-f]{40}', revision):
         raise ValueError('Revision must be an exact lowercase Git commit SHA')

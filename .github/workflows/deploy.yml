@@ -2,7 +2,7 @@ name: Deploy Mikołaj
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.ref_name == 'master' || github.ref_name == 'develop'
+    if: github.ref_name == 'master'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -47,9 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          args=(--ci --account "$CLOUDFLARE_ACCOUNT_ID" --zone "$CLOUDFLARE_ZONE_ID" --revision "$GITHUB_SHA" --branch "$GITHUB_REF_NAME")
-          if [[ "$GITHUB_REF_NAME" == develop ]]; then args+=(--preview); fi
-          python scripts/deploy.py "${args[@]}"
+          python scripts/deploy.py --ci --account "$CLOUDFLARE_ACCOUNT_ID" --zone "$CLOUDFLARE_ZONE_ID" --revision "$GITHUB_SHA" --branch "$GITHUB_REF_NAME"
       - name: Verify public revision, frontend bytes, CSP and protected API
         if: steps.branch_head.outputs.deploy == 'true'
         run: python scripts/verify_deployment.py --revision "$GITHUB_SHA" --branch "$GITHUB_REF_NAME"
@@ -62,5 +60,5 @@ jobs:
         if: steps.branch_head.outputs.deploy == 'true'
         shell: bash
         run: |
-          if [[ "$GITHUB_REF_NAME" == master ]]; then url=https://list.do.mikolaja.pl; else url=https://mikolaj-preview.jac3k.workers.dev; fi
+          url=https://list.do.mikolaja.pl
           printf '### Verified deployment\n- Site: %s\n- Commit: `%s`\n- Version: %s/version.json\n' "$url" "$GITHUB_SHA" "$url" >> "$GITHUB_STEP_SUMMARY"

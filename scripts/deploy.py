@@ -4,7 +4,7 @@
 Requires CLOUDFLARE_API_TOKEN. Creates only this application's Worker,
 SQLite Durable Object namespace and exact requested hostname.
 Never logs secrets. SETUP_TOKEN is generated once per Worker and retained.
-Usage: python scripts/deploy.py --account ACCOUNT --zone ZONE [--preview]
+Usage: python scripts/deploy.py --account ACCOUNT --zone ZONE
 """
 import argparse
 import json
@@ -82,19 +82,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--account', required=True)
     parser.add_argument('--zone', required=True)
-    parser.add_argument('--preview', action='store_true')
     parser.add_argument('--ci', action='store_true', help='Update existing deployments only; never create bootstrap, namespaces or routes')
     parser.add_argument('--revision', help='Exact 40-character Git commit SHA')
-    parser.add_argument('--branch', choices=['master', 'develop'])
+    parser.add_argument('--branch', choices=['master'])
     parser.add_argument('--rotate-setup-token', action='store_true', help='Explicit bootstrap recovery; invalidates the old setup link, not accounts or data')
     args = parser.parse_args()
     if args.revision is not None and not re.fullmatch(r'[0-9a-f]{40}', args.revision):
         parser.error('--revision must be an exact lowercase Git commit SHA')
     if args.ci and (not args.revision or not args.branch or args.rotate_setup_token):
         parser.error('--ci requires revision and branch, and forbids bootstrap rotation')
-    if args.branch and args.preview != (args.branch == 'develop'):
-        parser.error('develop requires --preview; master must target production')
-    name = 'mikolaj-preview' if args.preview else 'mikolaj'
+    name = 'mikolaj'
     hostname = 'mikolaj.walasek.xyz'
     prefix = f'/accounts/{args.account}/workers'
     verified = api('/user/tokens/verify')
@@ -107,7 +104,7 @@ def main():
     exists = any(script['id'] == name for script in scripts)
     if args.ci and not exists:
         raise RuntimeError('CI refuses to create a missing Worker or new data namespace')
-    if args.ci and not args.preview:
+    if args.ci:
         matching = [domain for domain in api(prefix + '/domains') if domain['hostname'] == hostname]
         if len(matching) != 1 or matching[0]['service'] != name or matching[0]['zone_id'] != args.zone:
             raise RuntimeError('CI refuses to deploy without the expected existing domain attachment')
@@ -115,11 +112,9 @@ def main():
     bindings = [{'type': 'durable_object_namespace', 'name': 'FAMILY', 'class_name': 'FamilyStore'}]
     bindings += [
         {'type': 'plain_text', 'name': 'DEPLOY_REVISION', 'text': args.revision or 'manual'},
-        {'type': 'plain_text', 'name': 'DEPLOY_BRANCH', 'text': args.branch or ('develop' if args.preview else 'master')},
+        {'type': 'plain_text', 'name': 'DEPLOY_BRANCH', 'text': 'master'},
     ]
     previous_namespace = None
-    if args.preview:
-        bindings.append({'type': 'plain_text', 'name': 'STORE_NAME', 'text': 'family-ui-test-v1'})
     if exists and not args.rotate_setup_token:
         bindings.append({'type': 'inherit', 'name': 'SETUP_TOKEN'})
         settings = api(prefix + f'/scripts/{name}/settings')
@@ -167,38 +162,31 @@ def main():
         raise RuntimeError('Read-back failed: missing or incorrect SETUP_TOKEN binding')
     if args.revision and not any(binding['name'] == 'DEPLOY_REVISION' and binding.get('type') == 'plain_text' and binding.get('text') == args.revision for binding in settings['bindings']):
         raise RuntimeError('Read-back failed: incorrect deployment revision')
-    expected_branch = args.branch or ('develop' if args.preview else 'master')
+    expected_branch = 'master'
     if not any(binding['name'] == 'DEPLOY_BRANCH' and binding.get('type') == 'plain_text' and binding.get('text') == expected_branch for binding in settings['bindings']):
         raise RuntimeError('Read-back failed: incorrect deployment branch')
     if setup:
         print('Private bootstrap persisted before upload:', private)
-    if not args.preview:
-        # Przypomnienie przed Wigilią: 3 grudnia (trzy tygodnie wcześniej), 9:00 UTC.
-        # Nowe życzenia: codziennie 11:00 UTC (południe zimą w Polsce).
-        api(prefix + f'/scripts/{name}/schedules', 'PUT', [{'cron': '0 9 3 12 *'}, {'cron': '0 11 * * *'}])
-    if args.preview:
-        if not args.ci:
-            api(prefix + f'/scripts/{name}/subdomain', 'POST', {'enabled': True, 'previews_enabled': False})
-        subdomain = api(prefix + '/subdomain')['subdomain']
-        print('PREVIEW_URL=https://' + name + '.' + subdomain + '.workers.dev')
-    else:
-        # Read exact resources before writing. Never overwrite unrelated records.
-        if args.ci:
-            print('DEPLOYED_URL=https://' + hostname)
-            print('Worker upload verified:', name, deployed.get('id'), 'revision:', args.revision)
-            return
-        records = api(f'/zones/{args.zone}/dns_records?name={hostname}')
-        domains = api(prefix + '/domains')
-        matching = [domain for domain in domains if domain['hostname'] == hostname]
-        if matching and matching[0]['service'] != name:
-            raise RuntimeError('Hostname already belongs to another Worker')
-        if records and not matching:
-            raise RuntimeError('Hostname has existing DNS records; refusing to replace them')
-        domain = api(prefix + '/domains', 'PUT', {'hostname': hostname, 'service': name, 'zone_id': args.zone, 'enabled': True, 'previews_enabled': False})
-        final = api(prefix + '/domains/' + domain['id'])
-        if final['hostname'] != hostname or final['service'] != name or not final['enabled']:
-            raise RuntimeError('Read-back failed: wrong domain configuration')
+    # Przypomnienie przed Wigilią: 3 grudnia (trzy tygodnie wcześniej), 9:00 UTC.
+    # Nowe życzenia: codziennie 11:00 UTC (południe zimą w Polsce).
+    api(prefix + f'/scripts/{name}/schedules', 'PUT', [{'cron': '0 9 3 12 *'}, {'cron': '0 11 * * *'}])
+    # Read exact resources before writing. Never overwrite unrelated records.
+    if args.ci:
         print('DEPLOYED_URL=https://' + hostname)
+        print('Worker upload verified:', name, deployed.get('id'), 'revision:', args.revision)
+        return
+    records = api(f'/zones/{args.zone}/dns_records?name={hostname}')
+    domains = api(prefix + '/domains')
+    matching = [domain for domain in domains if domain['hostname'] == hostname]
+    if matching and matching[0]['service'] != name:
+        raise RuntimeError('Hostname already belongs to another Worker')
+    if records and not matching:
+        raise RuntimeError('Hostname has existing DNS records; refusing to replace them')
+    domain = api(prefix + '/domains', 'PUT', {'hostname': hostname, 'service': name, 'zone_id': args.zone, 'enabled': True, 'previews_enabled': False})
+    final = api(prefix + '/domains/' + domain['id'])
+    if final['hostname'] != hostname or final['service'] != name or not final['enabled']:
+        raise RuntimeError('Read-back failed: wrong domain configuration')
+    print('DEPLOYED_URL=https://' + hostname)
     print('Worker upload verified:', name, deployed.get('id'))
 
 

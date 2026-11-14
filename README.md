@@ -1,26 +1,106 @@
-# Mikołaj
+<p align="center">
+  <img src="public/icon-192x192.png" width="96" height="96" alt="Mikołaj icon">
+</p>
 
-Prywatne, rodzinne listy do Świętego Mikołaja. Każdy może założyć własną rodzinę (zostaje jej organizatorem) i zaprosić bliskich linkiem; rodziny są od siebie oddzielone. W rodzinie: każdy pisze list i dodaje życzenia, bliscy rezerwują prezenty tak, żeby się nie dublować. Obdarowany nigdy nie widzi rezerwacji na swojej liście — także w odpowiedzi API.
+<h1 align="center">Mikołaj</h1>
 
-## Jak działa
+<p align="center">
+  Private family wish lists for Christmas — everyone writes a letter to Santa,<br>
+  relatives quietly pick gifts, and nobody buys the same thing twice.
+</p>
 
-- **Listy** — rozwijane osoby z listem i życzeniami (od najtańszych), „Kupię to” rezerwuje prezent.
-- **Kupuję** — prezenty, które wybrałem dla innych, pogrupowane według obdarowanych; odhaczanie kupionych.
-- **Moje** — mój list i życzenia, a także osoby, które prowadzę (dziecko bez telefonu, dziadkowie). Opiekun pisze za nie list i życzenia; prezenty dla innych rezerwuje na swoim koncie. Może przekazać tej osobie jej listę jednorazowym linkiem (ustawia e-mail i hasło).
-- **Rodzina** (tylko organizator) — kto co komu kupuje (bez listy organizatora), link zaproszenia, osoby: link do nowego hasła, uprawnienie do dodawania osób, zmiana opiekuna, przekazanie roli, usuwanie.
-- **Tryb organizatora** — włączany ręcznie, tylko w bieżącej sesji i na godzinę (pilnuje tego serwer): organizator edytuje listy i życzenia innych i przypisuje za nich prezenty. Jego własna lista dalej jest przed nim ukryta. W zakładce Rodzina można też hurtowo dodać osoby bez konta.
-- Życzenia mają przedział budżetowy zamiast ceny: Drobnostki (do 50 zł), Nie było niegrzecznie (50–200 zł), To był grzeczny rok (200–300 zł), Byłem aniołkiem (bez limitu).
+<p align="center">
+  <a href="https://list.do.mikolaja.pl"><strong>list.do.mikolaja.pl</strong></a>
+</p>
 
-## Kod
+---
 
-- `public/` — `index.html`, `app.css`, `app.js` (bez zależności i budowania).
-- `src/worker.js` — Cloudflare Worker + Durable Object na SQLite. Migracje dodają kolumny przy starcie, nie usuwają danych.
-- `scripts/` — wdrożenie (`deploy.py`), weryfikacja (`verify_deployment.py`), ochrona przed nieaktualnym przebiegiem (`branch_head_guard.py`).
+## Overview
 
-Hasła: PBKDF2-SHA256 (100 000 iteracji). Sesje: losowy token, w bazie tylko hash, cookie `__Host-mikolaj` HttpOnly/Secure/SameSite=Strict. Zapis wymaga własnego Origin i JSON. Uprawnienia sprawdza backend.
+Mikołaj (Polish for *Santa Claus*) is a small, private web app for families. Each person writes a short letter to Santa and adds wishes; the rest of the family reserves gifts so they don't double up. The surprise stays a surprise: **a recipient never learns what has been reserved on their own list** — not in the interface and not in any API response.
 
-## Wdrożenie
+The app is in Polish, minimalist by design (white and dark grey, a serif for accents, no borders or decorative icons), works on phones and desktops, supports light and dark mode, and can be added to the home screen as an app.
 
-Push do `master` → https://list.do.mikolaja.pl (stary adres mikolaj.walasek.xyz przekierowuje), push do `develop` → https://mikolaj-preview.jac3k.workers.dev (osobne dane). Workflow `.github/workflows/deploy.yml` sprawdza składnię, wgrywa źródła i weryfikuje wdrożenie. Wersja: `/version.json`.
+## Features
 
-Maile (Resend, nadawca listdo@mikolaja.pl): link do nowego hasła, zaproszenie od organizatora, codziennie w południe przypomnienie o prezentach, które wybrałeś do kupienia, i nowe (wolne) życzenia od bliskich i przypomnienie 3 grudnia. Nigdy nie zdradzają, co kto komu kupuje. **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.
+### For everyone
+
+- **Listy** — the family's lists. Each person folds open to their letter and wishes, sorted from cheapest. *Kupię to* (“I'll buy this”) reserves a gift; the name sticks to the top while you scroll through that person's list.
+- **Kupuję** — what you've picked for others, grouped by recipient, with *mark as bought* and *give up*. The tab appears only once you've reserved something.
+- **Moje** — your own letter and wishes, plus any people you manage.
+- **Budget tiers instead of prices** — every wish is tagged *Drobnostki* (up to 50 zł), *Nie było niegrzecznie* (50–200 zł), *To był grzeczny rok* (200–300 zł) or *Byłem aniołkiem* (no limit). Lists are ordered by tier.
+- **Change notices** — if a wish's budget changes after you reserved it, you see what it was before.
+- **Demo family** — the landing page opens a fully working example family in the browser, with no account and nothing saved.
+
+### People without a phone
+
+Children or grandparents don't need an account. Anyone allowed to add people can create them and write their letter and wishes on their behalf; gifts for others are still reserved from the manager's own account. Later, a one-time link lets that person take over their list with their own e-mail and password.
+
+### For the family organiser
+
+Whoever creates a family becomes its organiser and gets the **Rodzina** tab:
+
+- invitation link (copy or regenerate) and e-mail invitations,
+- bulk-adding people without accounts, one name per line,
+- per-person actions: password-reset link, permission to add people, change of manager, hand over the organiser role, remove from the family,
+- **organiser mode** — opt-in, per session, switched off automatically after an hour (enforced by the server). While it's on, the organiser can see who is buying what, edit other people's lists and assign gifts on their behalf. Their own list stays hidden from them even then.
+
+### E-mail
+
+Sent through [Resend](https://resend.com) from `listdo@mikolaja.pl`:
+
+- password reset (*Nie pamiętasz hasła?*),
+- invitations sent by the organiser,
+- a daily noon digest: new free wishes from relatives, and a reminder about gifts you picked but haven't bought yet,
+- a reminder three weeks before Christmas Eve (3 December).
+
+No e-mail ever reveals who is buying what for whom.
+
+## Architecture
+
+```
+public/            frontend — plain HTML, CSS and ES-module JavaScript, no build step
+  index.html
+  app.css
+  app.js
+  *.png, favicon.ico, site.webmanifest   icons and web-app manifest
+src/worker.js      Cloudflare Worker + one SQLite-backed Durable Object (FamilyStore)
+scripts/
+  deploy.py              uploads the sources to the existing Worker via the Cloudflare API
+  verify_deployment.py   checks the live revision, every public file byte for byte, CSP and the API
+  branch_head_guard.py   skips superseded CI runs so an old run can never overwrite a newer one
+.github/workflows/deploy.yml   push to master → check → upload → verify
+```
+
+- **No dependencies and no bundler.** The Worker imports the frontend files directly; images are uploaded as data modules.
+- **One API call for the whole UI.** `GET /api/state` returns everything the signed-in person may see, already trimmed by the server; the client re-renders from it after each action.
+- **Many families, one store.** All families live in one Durable Object, every query is scoped by family, and families never see each other.
+- **Additive migrations.** Schema changes run at start-up and only add columns or tables; existing data is never removed.
+
+## Security and privacy
+
+- Passwords: PBKDF2-SHA256, 100,000 iterations, random salt.
+- Sessions: random 256-bit token, only its hash is stored; `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 30 days.
+- Writes require the app's own `Origin` and a JSON body; requests are rate-limited per IP.
+- Strict Content-Security-Policy with a per-response script nonce.
+- One-time links (invitations, password resets, account hand-over) carry 256-bit secrets in the URL fragment and are removed from the address bar on load.
+- All permissions — ownership, managers, organiser mode — are checked on the server.
+
+## Deployment
+
+Every push to `master` deploys to **https://list.do.mikolaja.pl** through GitHub Actions:
+
+1. syntax check of the frontend and the Worker,
+2. guard against superseded runs,
+3. upload to the existing `mikolaj` Worker (bindings, secrets and the Durable Object namespace are preserved),
+4. verification of `/version.json`, every file in `public/`, the CSP and the anonymous API.
+
+The old address `mikolaj.walasek.xyz`, as well as `mikolaja.pl` and `mikołaja.pl`, redirect to the app. The live revision is always available at [`/version.json`](https://list.do.mikolaja.pl/version.json).
+
+The workflow needs a `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_ZONE_ID` variables. `RESEND_API_KEY` is a Worker secret set in Cloudflare and is inherited on every deploy.
+
+> **Do not rename** the `mikolaj` Worker, the `FamilyStore` class or the `family-v1` store name — that would detach the app from its existing data.
+
+## Local development
+
+There is nothing to install. Serve `public/` with any static server to work on the interface — the **demo family** on the landing page runs entirely in the browser without the API. Backend changes are best tested against the Worker's `FamilyStore` with an in-memory SQLite database (for example Node's built-in `node:sqlite`).
