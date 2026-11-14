@@ -87,11 +87,11 @@ async function sendMail(env, to, message) {
   if (!env.RESEND_API_KEY) fail(503, 'Wysyłanie maili nie jest jeszcze włączone.');
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${env.RESEND_API_KEY.trim()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: message.subject, html: mailHtml(message), text: mailText(message) }),
   });
   // Bez treści i adresów w logach.
-  if (!res.ok) { console.error('Mikolaj mail failed', res.status); fail(502, 'Nie udało się wysłać maila. Spróbuj ponownie za chwilę.'); }
+  if (!res.ok) { console.error('Mikolaj mail failed', res.status, (await res.json().catch(() => ({}))).name); fail(502, 'Nie udało się wysłać maila. Spróbuj ponownie za chwilę.'); }
 }
 
 const cookie = (token, age = SESSION_AGE) => `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${age}`;
@@ -298,7 +298,7 @@ export class FamilyStore extends DurableObject {
     }
     // Mail testowy — wyłącznie na stały adres właściciela, najwyżej 3 razy na dobę.
     if (method === 'POST' && path === '/api/mail-test') {
-      this.rateLimit('mail-test', 3, 86400);
+      this.rateLimit('mail-test:2', 3, 86400);
       await sendMail(this.env, TEST_TO, {
         subject: 'Mikołaj — test wysyłki', heading: 'Maile działają',
         lines: ['To wiadomość testowa z list.do.mikolaja.pl. Tak będą wyglądać zaproszenia, nowe hasła i przypomnienie przed Wigilią.', 'Ania zaprasza Cię do rodziny Kowalskich — do wspólnych list do Mikołaja.'],
