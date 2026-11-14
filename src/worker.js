@@ -27,19 +27,9 @@ const SESSION_AGE = 60 * 60 * 24 * 30;
 const LINK_AGE = 60 * 60 * 24 * 3;
 const COOKIE = '__Host-mikolaj';
 const TIERS = ['small', 'ok', 'good', 'angel'];
-const ROBOTS = `User-agent: facebookexternalhit
-User-agent: Facebot
-User-agent: WhatsApp
-User-agent: Twitterbot
-User-agent: Slackbot-LinkExpanding
-User-agent: Discordbot
-User-agent: TelegramBot
-User-agent: LinkedInBot
-Allow: /
-
-User-agent: *
-Disallow: /
-`;
+// wyszukiwarki widzą tylko stronę startową; listy, rodziny i tokeny są za /api/ albo po # w adresie
+const ROBOTS = 'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://list.do.mikolaja.pl/sitemap.xml\n';
+const SITEMAP = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://list.do.mikolaja.pl/</loc></url></urlset>\n';
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -52,7 +42,7 @@ class AppError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 const fail = (status, message) => { throw new AppError(status, message); };
-const json = (value, status = 200, headers = {}) => Response.json(value, { status, headers: { ...SECURITY, 'Cache-Control': 'no-store', ...headers } });
+const json = (value, status = 200, headers = {}) => Response.json(value, { status, headers: { ...SECURITY, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', ...headers } });
 const hex = bytes => Array.from(new Uint8Array(bytes), n => n.toString(16).padStart(2, '0')).join('');
 const random = () => hex(crypto.getRandomValues(new Uint8Array(32)));
 const digest = async value => hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)));
@@ -153,6 +143,18 @@ export class FamilyStore extends DurableObject {
     addColumn('wishes', 'tier', 'TEXT');
     addColumn('reservations', 'reserved_at', 'INTEGER NOT NULL DEFAULT 0'); // do przypomnienia „masz to kupić”
     addColumn('sessions', 'admin_until', 'INTEGER NOT NULL DEFAULT 0'); // tryb organizatora — per sesja, wygasa sam
+    // Konto (e-mail + hasło) jest osobno od członkostwa — jedna osoba może być w wielu rodzinach,
+    // w każdej z własnym listem, życzeniami i rolą. Sesja wskazuje aktywne członkostwo.
+    this.sql.exec('CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, last_member TEXT)');
+    addColumn('members', 'account_id', 'TEXT');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS members_account ON members(account_id)');
+    // Jednorazowo: każdy dotychczasowy członek z kontem dostaje konto o tym samym id.
+    // Stare kolumny members.email/salt/password_hash zostają nietknięte — dotychczasowe konta działają też po ewentualnym cofnięciu wdrożenia.
+    const legacy = 'managed_by IS NULL AND account_id IS NULL';
+    if (this.one(`SELECT 1 AS x FROM members WHERE ${legacy} LIMIT 1`)) ctx.storage.transactionSync(() => {
+      this.sql.exec(`INSERT INTO accounts(id,email,salt,password_hash,last_member) SELECT id,email,salt,password_hash,id FROM members WHERE ${legacy}`);
+      this.sql.exec(`UPDATE members SET account_id=id WHERE ${legacy}`);
+    });
     this.sql.exec("UPDATE wishes SET tier = CASE WHEN price IS NULL THEN 'ok' WHEN price < 50 THEN 'small' WHEN price < 200 THEN 'ok' WHEN price <= 300 THEN 'good' ELSE 'angel' END WHERE tier IS NULL");
     this.sql.exec("UPDATE reservations SET snapshot=(SELECT json_object('title',title,'note',note,'url',url,'tier',tier) FROM wishes WHERE wishes.id=reservations.wish_id) WHERE snapshot='{}'");
   }
@@ -163,16 +165,40 @@ export class FamilyStore extends DurableObject {
     this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1', key, now() + seconds);
     if (this.one('SELECT count FROM limits WHERE key=?', key).count > max) fail(429, 'Za dużo prób. Spróbuj ponownie za kilkanaście minut.');
   }
-  async session(member) {
+  // Członkostwo konta, w które wchodzimy: wskazane, ostatnio używane albo pierwsze.
+  pickMember(accountId, preferred) {
+    return (preferred && this.one('SELECT id FROM members WHERE id=? AND account_id=?', preferred, accountId))
+      || this.one('SELECT m.id FROM members m JOIN accounts a ON a.id=m.account_id WHERE a.id=? ORDER BY m.id=a.last_member DESC, m.rowid LIMIT 1', accountId);
+  }
+  async session(account, memberId) {
     const token = random();
     const hash = await digest(token);
     this.ctx.storage.transactionSync(() => {
-      const current = this.one('SELECT password_hash FROM members WHERE id=?', member.id);
-      if (!current || current.password_hash !== member.password_hash) fail(401, 'Dane logowania zmieniły się. Zaloguj się ponownie.');
+      const current = this.one('SELECT password_hash FROM accounts WHERE id=?', account.id);
+      if (!current || current.password_hash !== account.password_hash) fail(401, 'Dane logowania zmieniły się. Zaloguj się ponownie.');
+      const m = this.pickMember(account.id, memberId);
+      if (!m) fail(401, 'To konto nie należy już do żadnej rodziny. Poproś bliskich o nowe zaproszenie.');
       this.sql.exec('DELETE FROM sessions WHERE expires < ?', now());
-      this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', hash, member.id, now() + SESSION_AGE);
+      this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', hash, m.id, now() + SESSION_AGE);
+      this.sql.exec('UPDATE accounts SET last_member=? WHERE id=?', m.id, account.id);
     });
     return json({ ok: true }, 200, { 'Set-Cookie': cookie(token) });
+  }
+  async newFamily(name) {
+    const invite = random();
+    return { id: crypto.randomUUID(), name: text(name, 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
+  }
+  insertFamily(f) { // w transakcji
+    if (this.one('SELECT COUNT(*) AS n FROM family').n >= 2000) fail(503, 'Chwilowo nie można zakładać nowych rodzin. Spróbuj później.');
+    this.sql.exec('INSERT INTO family(id,name,invite,invite_hash) VALUES(?,?,?,?)', f.id, f.name, f.invite, f.invite_hash);
+  }
+  // Nowe członkostwo konta w rodzinie (wywoływać w transakcji). Kolumny email/hasło w members są tylko zaślepką.
+  addMembership(familyId, accountId, name, admin) {
+    if (this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', familyId, accountId)) fail(409, 'Już jesteś w tej rodzinie.');
+    if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', familyId).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
+    const id = crypto.randomUUID();
+    this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,is_admin,can_add,account_id) VALUES(?,?,?,?,?,?,?,?,?)', id, familyId, name, `acct:${id}`, '', '', admin ? 1 : 0, admin ? 1 : 0, accountId);
+    return id;
   }
   async newLink(member) {
     const token = random();
@@ -190,15 +216,21 @@ export class FamilyStore extends DurableObject {
     if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
     this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?)', `remind:${year}`, now() + 60 * 60 * 24 * 300);
     let sent = 0;
-    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL')) {
-      const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
-      const wishes = this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', p.id).n;
+    // Jeden mail na konto — z każdej rodziny, w której ta osoba jest.
+    for (const acct of this.rows('SELECT id,email FROM accounts')) {
+      const ms = this.memberships(acct.id);
+      if (!ms.length) continue;
       const lines = [];
-      if (todo) lines.push(`Masz jeszcze ${todo} ${pl(todo, 'prezent', 'prezenty', 'prezentów')} do kupienia.`);
-      if (!p.letter && !wishes) lines.push('Nie masz jeszcze listu ani życzeń — bliscy nie wiedzą, co Ci kupić.');
+      for (const p of ms) {
+        const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
+        const wishes = this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', p.id).n;
+        const where = ms.length > 1 ? `${p.family}: ` : '';
+        if (todo) lines.push(`${where}${ms.length > 1 ? 'masz' : 'Masz'} jeszcze ${todo} ${pl(todo, 'prezent', 'prezenty', 'prezentów')} do kupienia.`);
+        if (!p.letter && !wishes) lines.push(`${where}${ms.length > 1 ? 'nie masz' : 'Nie masz'} jeszcze listu ani życzeń — bliscy nie wiedzą, co Ci kupić.`);
+      }
       if (!lines.length) continue;
       try {
-        await sendMail(this.env, p.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${p.name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
+        await sendMail(this.env, acct.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${ms[0].name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
         sent++;
       } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
     }
@@ -229,24 +261,36 @@ export class FamilyStore extends DurableObject {
       return [...groups.values()].map(g => `${g.name}: ${g.titles.join(', ')}`);
     };
     let sent = 0;
-    for (const fid of families) {
-      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL', fid)) {
+    // Jeden mail na konto; przy kilku rodzinach każda ma swój nagłówek.
+    const accounts = families.length ? this.rows(`SELECT DISTINCT a.id,a.email FROM accounts a JOIN members m ON m.account_id=a.id
+      WHERE m.family_id IN (SELECT value FROM json_each(?))`, JSON.stringify(families)) : [];
+    for (const acct of accounts) {
+      const ms = this.memberships(acct.id);
+      const lines = [];
+      let anyMine = false;
+      for (const p of ms) {
         const mine = picks.filter(x => x.member_id === p.id);
-        const news = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
+        const news = fresh.filter(w => w.family_id === p.family_id && w.owner_id !== p.id && w.managed_by !== p.id);
         if (!mine.length && !news.length) continue;
         const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
-        const lines = [];
-        if (mine.length) lines.push('Pamiętaj — wybrałeś(-aś) do kupienia:', ...byOwner(mine), `Wszystkich prezentów do kupienia: ${todo}.`);
+        if (ms.length > 1) lines.push(`— ${p.family} —`);
+        if (mine.length) { anyMine = true; lines.push('Pamiętaj — wybrałeś(-aś) do kupienia:', ...byOwner(mine), `Wszystkich prezentów do kupienia: ${todo}.`); }
         if (news.length) lines.push(mine.length ? 'Na listach pojawiły się też nowe życzenia:' : 'Na listach pojawiły się nowe życzenia — może coś z tego kupisz?', ...byOwner(news));
-        try {
-          await sendMail(this.env, p.email, mine.length
-            ? { subject: 'Pamiętaj o prezentach do kupienia', heading: `Cześć, ${p.name}`, lines, button: { label: 'Otwórz Kupuję', url: `${APP_URL}/#/kupuje` }, foot: 'Gdy coś kupisz, odhacz to w zakładce Kupuję. Raz dziennie, tylko gdy jest o czym przypomnieć.' }
-            : { subject: 'Nowe życzenia na listach', heading: `Cześć, ${p.name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
-          sent++;
-        } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
       }
+      if (!lines.length) continue;
+      const name = ms[0].name;
+      try {
+        await sendMail(this.env, acct.email, anyMine
+          ? { subject: 'Pamiętaj o prezentach do kupienia', heading: `Cześć, ${name}`, lines, button: { label: 'Otwórz Kupuję', url: `${APP_URL}/#/kupuje` }, foot: 'Gdy coś kupisz, odhacz to w zakładce Kupuję. Raz dziennie, tylko gdy jest o czym przypomnieć.' }
+          : { subject: 'Nowe życzenia na listach', heading: `Cześć, ${name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
+        sent++;
+      } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
     }
     return { sent };
+  }
+  // Wszystkie rodziny konta (członkostwa), od najstarszego.
+  memberships(accountId) {
+    return this.rows('SELECT m.id,m.name,m.letter,m.family_id,m.is_admin,f.name AS family FROM members m JOIN family f ON f.id=m.family_id WHERE m.account_id=? ORDER BY m.rowid', accountId);
   }
 
   // Wszystko, czego potrzebuje aplikacja — przycięte do tego, co ta osoba może wiedzieć.
@@ -271,13 +315,14 @@ export class FamilyStore extends DurableObject {
       }
       return wish;
     });
-    return { user: { id: me.id, name: me.name, email: me.email, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0 }, family, members, wishes };
+    const families = this.memberships(me.account_id).map(m => ({ memberId: m.id, name: m.family, isAdmin: Boolean(m.is_admin) }));
+    return { user: { id: me.id, name: me.name, email: me.login, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0 }, family, families, members, wishes };
   }
   god(me) { return Boolean(me.is_admin) && me.admin_until > now(); }
   // Przegląd organizatora — bez rezerwacji na jego własnej liście.
   admin(me, origin) {
-    const members = this.rows('SELECT id,name,email,is_admin,can_add,managed_by FROM members WHERE family_id=? ORDER BY name COLLATE NOCASE', me.family_id)
-      .map(m => ({ id: m.id, name: m.name, email: m.managed_by ? null : m.email, isAdmin: Boolean(m.is_admin), canAdd: Boolean(m.can_add), managedBy: m.managed_by }));
+    const members = this.rows('SELECT m.id,m.name,a.email AS login,m.is_admin,m.can_add,m.managed_by FROM members m LEFT JOIN accounts a ON a.id=m.account_id WHERE m.family_id=? ORDER BY m.name COLLATE NOCASE', me.family_id)
+      .map(m => ({ id: m.id, name: m.name, email: m.managed_by ? null : m.login, isAdmin: Boolean(m.is_admin), canAdd: Boolean(m.can_add), managedBy: m.managed_by }));
     // Kto co kupuje — tylko w tymczasowym trybie organizatora.
     const all = !this.god(me) ? [] : this.rows(`SELECT w.id AS wishId,w.title,w.tier,w.owner_id AS ownerId,r.member_id AS buyerId,r.purchased
       FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id WHERE m.family_id=? ORDER BY w.created_at`, me.family_id);
@@ -333,12 +378,13 @@ export class FamilyStore extends DurableObject {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
       const e = text(body.email, 'E-mail', 254, true).toLowerCase();
       if (typeof body.password !== 'string' || body.password.length > 256) fail(400, 'Podaj hasło.');
-      const member = this.one('SELECT * FROM members WHERE email=? AND managed_by IS NULL', e);
-      const computed = await passwordHash(body.password, member?.salt || 'missing-user-timing-padding');
-      if (!member || !constantEqual(computed, member.password_hash)) fail(401, 'Nieprawidłowy e-mail lub hasło.');
-      return this.session(member);
+      const account = this.one('SELECT * FROM accounts WHERE email=?', e);
+      const computed = await passwordHash(body.password, account?.salt || 'missing-user-timing-padding');
+      if (!account || !constantEqual(computed, account.password_hash)) fail(401, 'Nieprawidłowy e-mail lub hasło.');
+      return this.session(account);
     }
     // Rejestracja: każdy może założyć własną rodzinę i zostaje jej organizatorem.
+    // Dołączenie z zaproszenia: nowe konto albo — gdy e-mail i hasło pasują do istniejącego — kolejna rodzina tego konta.
     if (method === 'POST' && (path === '/api/register' || path === '/api/join')) {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
       const input = { name: text(body.name, 'Imię', 60, true), email: email(body.email), password: password(body.password) };
@@ -346,27 +392,32 @@ export class FamilyStore extends DurableObject {
       let family;
       if (register) {
         this.rateLimit(`register:${ipKey}`, 5, 3600);
-        const invite = random();
-        family = { id: crypto.randomUUID(), name: text(body.familyName, 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
+        family = await this.newFamily(body.familyName);
       } else {
         if (typeof body.inviteToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.inviteToken)) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
         family = this.one('SELECT * FROM family WHERE invite_hash=?', await digest(body.inviteToken));
         if (!family) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
       }
-      const salt = random(), hash = await passwordHash(input.password, salt), id = crypto.randomUUID();
+      const existing = register ? null : this.one('SELECT * FROM accounts WHERE email=?', input.email);
+      const salt = existing?.salt || random(), hash = await passwordHash(input.password, salt);
+      if (existing && !constantEqual(hash, existing.password_hash)) fail(409, 'Masz już konto z tym adresem — wpisz jego hasło albo zaloguj się i otwórz link ponownie.');
+      let account, memberId;
       // Ponowne sprawdzenie po asynchronicznym KDF, w transakcji.
       this.ctx.storage.transactionSync(() => {
-        if (this.one('SELECT id FROM members WHERE email=?', input.email)) fail(409, 'Nie można utworzyć konta z tym adresem. Spróbuj się zalogować.');
-        if (register) {
-          if (this.one('SELECT COUNT(*) AS n FROM family').n >= 2000) fail(503, 'Chwilowo nie można zakładać nowych rodzin. Spróbuj później.');
-          this.sql.exec('INSERT INTO family(id,name,invite,invite_hash) VALUES(?,?,?,?)', family.id, family.name, family.invite, family.invite_hash);
+        if (existing) {
+          account = this.one('SELECT * FROM accounts WHERE id=?', existing.id);
+          if (!account || account.password_hash !== existing.password_hash) fail(409, 'Dane logowania zmieniły się. Spróbuj ponownie.');
         } else {
-          if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
-          if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', family.id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
+          if (this.one('SELECT id FROM accounts WHERE email=?', input.email)) fail(409, 'Nie można utworzyć konta z tym adresem. Spróbuj się zalogować.');
+          account = { id: crypto.randomUUID(), email: input.email, salt, password_hash: hash };
         }
-        this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,is_admin,can_add) VALUES(?,?,?,?,?,?,?,?)', id, family.id, input.name, input.email, salt, hash, register ? 1 : 0, register ? 1 : 0);
+        if (register) this.insertFamily(family);
+        else if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
+        if (!existing) this.sql.exec('INSERT INTO accounts(id,email,salt,password_hash) VALUES(?,?,?,?)', account.id, account.email, account.salt, account.password_hash);
+        const already = existing && this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', family.id, account.id);
+        memberId = already ? already.id : this.addMembership(family.id, account.id, input.name, register);
       });
-      return this.session(this.one('SELECT * FROM members WHERE id=?', id));
+      return this.session(account, memberId);
     }
     if (method === 'GET' && /^\/api\/invitation\/[a-f0-9]{64}$/.test(path)) {
       this.rateLimit(`invite:${ipKey}`, 60, 900);
@@ -380,11 +431,13 @@ export class FamilyStore extends DurableObject {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
       this.rateLimit(`forgot:${ipKey}`, 5, 3600);
       const e = email(body.email);
-      const m = this.one('SELECT * FROM members WHERE email=? AND managed_by IS NULL', e);
+      const acct = this.one('SELECT * FROM accounts WHERE email=?', e);
+      const pick = acct && this.pickMember(acct.id);
+      const m = pick && this.one('SELECT * FROM members WHERE id=?', pick.id);
       if (m && this.env.RESEND_API_KEY) {
         try {
         this.rateLimit(`forgot-to:${await digest(e)}`, 3, 86400);
-        await sendMail(this.env, m.email, {
+        await sendMail(this.env, acct.email, {
           subject: 'Nowe hasło do listów do Mikołaja', heading: `Cześć, ${m.name}`,
           lines: ['Ktoś poprosił o nowe hasło do Twojego konta. Jeśli to Ty — kliknij poniżej i ustaw nowe.'],
           button: { label: 'Ustaw nowe hasło', url: `${url.origin}/#link=${await this.newLink(m)}` },
@@ -409,23 +462,50 @@ export class FamilyStore extends DurableObject {
       if (method === 'GET') return json({ name: member.name, needsEmail: Boolean(member.managed_by) });
       if (method !== 'POST') fail(405, 'Niedozwolona metoda.');
       const pass = password(body.password);
-      const e = member.managed_by ? email(body.email) : member.email;
-      const salt = random(), pw = await passwordHash(pass, salt);
+      // Nowe hasło do istniejącego konta.
+      if (!member.managed_by) {
+        const salt = random(), pw = await passwordHash(pass, salt);
+        let account;
+        this.ctx.storage.transactionSync(() => {
+          member = find();
+          if (!member || member.managed_by || !member.account_id) fail(404, 'Ten link wygasł albo został już użyty.');
+          this.sql.exec('UPDATE accounts SET salt=?,password_hash=? WHERE id=?', salt, pw, member.account_id);
+          // Wszystkie sesje i linki konta — ze wszystkich rodzin.
+          this.sql.exec('DELETE FROM links WHERE member_id IN (SELECT id FROM members WHERE account_id=?)', member.account_id);
+          this.sql.exec('DELETE FROM sessions WHERE member_id IN (SELECT id FROM members WHERE account_id=?)', member.account_id);
+          account = this.one('SELECT * FROM accounts WHERE id=?', member.account_id);
+        });
+        return this.session(account, member.id);
+      }
+      // Przejęcie listy: nowe konto albo podpięcie pod istniejące (wtedy hasło musi się zgadzać).
+      const e = email(body.email);
+      const existing = this.one('SELECT * FROM accounts WHERE email=?', e);
+      const salt = existing?.salt || random(), pw = await passwordHash(pass, salt);
+      if (existing && !constantEqual(pw, existing.password_hash)) fail(409, 'Ten adres ma już konto — wpisz jego hasło, a lista dołączy do Twojego konta.');
+      let account;
       this.ctx.storage.transactionSync(() => {
         member = find();
-        if (!member) fail(404, 'Ten link wygasł albo został już użyty.');
-        if (this.one('SELECT id FROM members WHERE email=? AND id<>?', e, member.id)) fail(409, 'Ten adres jest już używany.');
-        this.sql.exec('UPDATE members SET email=?,salt=?,password_hash=?,managed_by=NULL WHERE id=?', e, salt, pw, member.id);
+        if (!member || !member.managed_by) fail(404, 'Ten link wygasł albo został już użyty.');
+        if (existing) {
+          account = this.one('SELECT * FROM accounts WHERE id=?', existing.id);
+          if (!account || account.password_hash !== existing.password_hash) fail(409, 'Dane logowania zmieniły się. Spróbuj ponownie.');
+          if (this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', member.family_id, account.id)) fail(409, 'To konto jest już w tej rodzinie. Poproś organizatora, żeby usunął jedną z list.');
+        } else {
+          if (this.one('SELECT id FROM accounts WHERE email=?', e)) fail(409, 'Ten adres jest już używany.');
+          account = { id: crypto.randomUUID(), email: e, salt, password_hash: pw };
+          this.sql.exec('INSERT INTO accounts(id,email,salt,password_hash) VALUES(?,?,?,?)', account.id, account.email, account.salt, account.password_hash);
+        }
+        this.sql.exec('UPDATE members SET account_id=?,email=?,managed_by=NULL WHERE id=?', account.id, `acct:${member.id}`, member.id);
         this.sql.exec('DELETE FROM links WHERE member_id=?', member.id);
         this.sql.exec('DELETE FROM sessions WHERE member_id=?', member.id);
       });
-      return this.session(this.one('SELECT * FROM members WHERE id=?', member.id));
+      return this.session(account, member.id);
     }
 
     // ---------- z logowaniem ----------
     const token = request.headers.get('Cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || '';
     const sessionHash = /^[a-f0-9]{64}$/.test(token) ? await digest(token) : '';
-    const me = sessionHash ? this.one('SELECT m.*,s.admin_until FROM members m JOIN sessions s ON s.member_id=m.id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
+    const me = sessionHash ? this.one('SELECT m.*,s.admin_until,a.email AS login FROM sessions s JOIN members m ON m.id=s.member_id JOIN accounts a ON a.id=m.account_id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
     if (method === 'GET' && path === '/api/state') return json(me ? { ...this.state(me), mail: Boolean(this.env.RESEND_API_KEY) } : { user: null, mail: Boolean(this.env.RESEND_API_KEY) });
     if (method === 'POST' && path === '/api/logout') {
       this.sql.exec('DELETE FROM sessions WHERE hash=?', sessionHash);
@@ -437,6 +517,43 @@ export class FamilyStore extends DurableObject {
     const god = this.god(me);
     const canEdit = m => m.id === me.id || m.managed_by === me.id || god;
     const adminOnly = () => { if (!me.is_admin) fail(403, 'To może zrobić tylko organizator rodziny.'); };
+
+    // Kilka rodzin na jednym koncie: sesja wskazuje aktywną; przełączenie wyłącza tryb organizatora.
+    const switchTo = memberId => {
+      this.sql.exec('UPDATE sessions SET member_id=?,admin_until=0 WHERE hash=?', memberId, sessionHash);
+      this.sql.exec('UPDATE accounts SET last_member=? WHERE id=?', memberId, me.account_id);
+    };
+    if (method === 'POST' && path === '/api/switch') {
+      const target = typeof body.memberId === 'string' && this.one('SELECT id FROM members WHERE id=? AND account_id=?', body.memberId, me.account_id);
+      if (!target) fail(404, 'Nie należysz do tej rodziny.');
+      switchTo(target.id);
+      return json({ ok: true });
+    }
+    if (method === 'POST' && path === '/api/families') {
+      this.rateLimit(`register:${ipKey}`, 5, 3600);
+      const family = await this.newFamily(body.familyName);
+      const name = text(body.name ?? me.name, 'Imię', 60, true);
+      this.ctx.storage.transactionSync(() => {
+        this.insertFamily(family);
+        switchTo(this.addMembership(family.id, me.account_id, name, true));
+      });
+      return json({ ok: true });
+    }
+    if (method === 'POST' && path === '/api/families/join') {
+      this.rateLimit(`auth:${ipKey}`, 30, 900);
+      if (typeof body.inviteToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.inviteToken)) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
+      const inviteHash = await digest(body.inviteToken);
+      const name = text(body.name ?? me.name, 'Imię', 60, true);
+      let already = false;
+      this.ctx.storage.transactionSync(() => {
+        const family = this.one('SELECT id FROM family WHERE invite_hash=?', inviteHash);
+        if (!family) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
+        const existing = this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', family.id, me.account_id);
+        already = Boolean(existing);
+        switchTo(existing ? existing.id : this.addMembership(family.id, me.account_id, name, false));
+      });
+      return json({ ok: true, already });
+    }
 
     if (method === 'GET' && path === '/api/admin') { adminOnly(); return json(this.admin(me, url.origin)); }
     // Tryb organizatora: włączany ręcznie, tylko w tej sesji, wyłącza się sam po godzinie.
@@ -514,10 +631,15 @@ export class FamilyStore extends DurableObject {
         this.ctx.storage.transactionSync(() => {
           this.sql.exec('DELETE FROM reservations WHERE member_id=? OR wish_id IN (SELECT id FROM wishes WHERE owner_id=?)', target.id, target.id);
           this.sql.exec('DELETE FROM wishes WHERE owner_id=?', target.id);
-          this.sql.exec('DELETE FROM sessions WHERE member_id=?', target.id);
+          // Konto w innych rodzinach zostaje zalogowane — sesje przechodzą do innej jego rodziny.
+          const other = target.account_id && this.one('SELECT id FROM members WHERE account_id=? AND id<>? ORDER BY rowid LIMIT 1', target.account_id, target.id);
+          if (other) this.sql.exec('UPDATE sessions SET member_id=?,admin_until=0 WHERE member_id=?', other.id, target.id);
+          else this.sql.exec('DELETE FROM sessions WHERE member_id=?', target.id);
           this.sql.exec('DELETE FROM links WHERE member_id=?', target.id);
           this.sql.exec('UPDATE members SET managed_by=? WHERE managed_by=?', me.id, target.id);
           this.sql.exec('DELETE FROM members WHERE id=?', target.id);
+          // Ostatnia rodzina — konto znika razem z nią, jak dotąd.
+          if (target.account_id && !other) this.sql.exec('DELETE FROM accounts WHERE id=?', target.account_id);
         });
         return json({ ok: true });
       }
@@ -620,8 +742,8 @@ export default {
       '/inter.woff2': [fontInter, 'font/woff2'],
       '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
       '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
-      // wyszukiwarki nie, ale komunikatory mogą pobrać stronę i obrazek do podglądu linku
       '/robots.txt': [ROBOTS, 'text/plain; charset=utf-8'],
+      '/sitemap.xml': [SITEMAP, 'application/xml; charset=utf-8'],
     };
     const asset = assets[url.pathname];
     if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });

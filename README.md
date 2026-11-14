@@ -73,6 +73,7 @@ scripts/
 .github/workflows/deploy.yml   push to master → check → upload → verify
 ```
 
+- **Only the landing page is public.** Search engines may index `/` (robots.txt, sitemap, canonical, JSON-LD); everything else lives behind `/api/` (disallowed, `X-Robots-Tag: noindex`, login required) or after the `#` in the URL, which never reaches a server.
 - **No dependencies and no bundler.** The Worker imports the frontend files directly; images and fonts are uploaded as data modules. Icons and fonts are cached for a year, so a changed file needs a new name.
 - **One API call for the whole UI.** `GET /api/state` returns everything the signed-in person may see, already trimmed by the server; the client re-renders from it after each action.
 - **Many families, one store.** All families live in one Durable Object, every query is scoped by family, and families never see each other.

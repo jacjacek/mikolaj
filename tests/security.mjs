@@ -129,4 +129,106 @@ await check('Reset establishes session and invalidates old session', async () =>
 await check('Oversized body rejected', async () => {
   const f=fixture(); assert.equal((await f.call('login','POST',{email:'a'.repeat(17000)})).status,413);
 });
+await check('One account in several families with separate roles', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B');
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  // A dołącza do rodziny B tym samym kontem, będąc zalogowanym
+  const j=await f.call('families/join','POST',{inviteToken:invite},a.cookie);
+  assert.equal(j.status,200);
+  let s=(await f.call('state','GET',undefined,a.cookie)).body;
+  assert.equal(s.family.name,'B family'); assert.equal(s.user.isAdmin,false); assert.equal(s.families.length,2);
+  assert.equal((await f.call('admin','GET',undefined,a.cookie)).status,403);
+  // przełączenie z powrotem: znów organizator
+  const home=s.families.find(x=>x.name==='A family');
+  assert.equal((await f.call('switch','POST',{memberId:home.memberId},a.cookie)).status,200);
+  s=(await f.call('state','GET',undefined,a.cookie)).body;
+  assert.equal(s.user.isAdmin,true); assert.equal(s.user.id,a.id);
+  // nie da się przełączyć na cudze członkostwo
+  assert.equal((await f.call('switch','POST',{memberId:b.id},a.cookie)).status,404);
+  // drugi raz to samo zaproszenie nie tworzy duplikatu
+  assert.equal((await f.call('families/join','POST',{inviteToken:invite},a.cookie)).body.already,true);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM members WHERE account_id=?').get(a.id).n,2);
+});
+await check('Families of one account stay isolated', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B'), w=await f.addWish(b);
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:invite},a.cookie);
+  const s=(await f.call('state','GET',undefined,a.cookie)).body;
+  await f.call('switch','POST',{memberId:s.families.find(x=>x.name==='A family').memberId},a.cookie);
+  // w rodzinie A nie widać ani nie zmienia się niczego z rodziny B
+  assert.equal((await f.call(`wishes/${w}/reserve`,'POST',{},a.cookie)).status,404);
+  assert.equal((await f.call('state','GET',undefined,a.cookie)).body.wishes.some(x=>x.id===w),false);
+  // tryb organizatora nie przechodzi do innej rodziny
+  await f.call('session','PATCH',{adminMode:true},a.cookie);
+  await f.call('switch','POST',{memberId:s.families.find(x=>x.name==='B family').memberId},a.cookie);
+  assert.equal((await f.call('state','GET',undefined,a.cookie)).body.user.adminUntil,0);
+});
+await check('Join form attaches existing account only with its password', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B');
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  assert.equal((await f.call('join','POST',{name:'A',email:a.email,password:'wrong-password',inviteToken:invite})).status,409);
+  const r=await f.call('join','POST',{name:'Ania',email:a.email,password:'long-audit-password',inviteToken:invite});
+  assert.equal(r.status,200);
+  const s=(await f.call('state','GET',undefined,r.cookie)).body;
+  assert.equal(s.family.name,'B family'); assert.equal(s.user.name,'Ania'); assert.equal(s.families.length,2);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM accounts').get().n,2);
+});
+await check('Removal from one family keeps the account in others', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B');
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:invite},a.cookie);
+  const inB=(await f.call('state','GET',undefined,a.cookie)).body.user.id;
+  assert.equal((await f.call(`members/${inB}`,'DELETE',undefined,b.cookie)).status,200);
+  const s=(await f.call('state','GET',undefined,a.cookie)).body;
+  assert.equal(s.user.id,a.id); assert.equal(s.families.length,1);
+  assert.equal((await f.call('login','POST',{email:a.email,password:'long-audit-password'})).status,200);
+  // usunięcie z ostatniej rodziny usuwa konto
+  const c=await f.join(b,'C');
+  await f.call(`members/${c.id}`,'DELETE',undefined,b.cookie);
+  assert.equal((await f.call('login','POST',{email:c.email,password:'long-audit-password'})).status,401);
+});
+await check('Takeover link can attach list to an existing account', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B');
+  const kid=(await f.call('members','POST',{name:'Kid'},b.cookie)).body.id;
+  const url=(await f.call(`members/${kid}/link`,'POST',{},b.cookie)).body.url, token=url.split('=')[1];
+  assert.equal((await f.call(`link/${token}`,'POST',{email:a.email,password:'wrong-password'})).status,409);
+  const r=await f.call(`link/${token}`,'POST',{email:a.email,password:'long-audit-password'});
+  assert.equal(r.status,200);
+  const s=(await f.call('state','GET',undefined,r.cookie)).body;
+  assert.equal(s.user.id,kid); assert.equal(s.families.length,2);
+  // stare hasło konta działa dalej
+  assert.equal((await f.call('login','POST',{email:a.email,password:'long-audit-password'})).status,200);
+});
+await check('Password reset ends sessions in every family', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B');
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:invite},a.cookie); // sesja a wskazuje teraz rodzinę B
+  const second=(await f.call('login','POST',{email:a.email,password:'long-audit-password'})).cookie;
+  const token=await f.store.newLink(a);
+  assert.equal((await f.call(`link/${token}`,'POST',{password:'replacement-password'})).status,200);
+  assert.equal((await f.call('state','GET',undefined,a.cookie)).body.user,null);
+  assert.equal((await f.call('state','GET',undefined,second)).body.user,null);
+});
+await check('Digest sends one mail per account across families', async () => {
+  const f=fixture(true), a=await f.register('A'), b=await f.register('B'), c=await f.join(a,'C');
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:invite},c.cookie);
+  await f.addWish(a); await f.addWish(b);
+  await f.store.digest();
+  const toC=f.sent.filter(m=>m.to[0]===c.email);
+  assert.equal(toC.length,1);
+  assert.match(toC[0].text,/A family/); assert.match(toC[0].text,/B family/);
+});
+await check('Legacy members migrate to accounts', async () => {
+  const f=fixture(), a=await f.register('A');
+  // symulacja starej bazy: członek bez konta w tabeli accounts
+  f.db.exec("DELETE FROM sessions; DELETE FROM accounts; UPDATE members SET account_id=NULL");
+  const salt='s';
+  const pw=await (async()=>{ const k=await webcrypto.subtle.importKey('raw',new TextEncoder().encode('legacy-pass'),'PBKDF2',false,['deriveBits']); return Buffer.from(await webcrypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:100000,hash:'SHA-256'},k,256)).toString('hex'); })();
+  f.db.prepare("UPDATE members SET email='legacy@example.test',salt=?,password_hash=? WHERE id=?").run(salt,pw,a.id);
+  const store2=new f.context.Store(f.store.ctx,{});
+  const r=await store2.fetch(new Request('https://audit.example/api/login',{method:'POST',headers:{'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.9'},body:JSON.stringify({email:'legacy@example.test',password:'legacy-pass'})}));
+  assert.equal(r.status,200);
+  assert.equal(f.db.prepare('SELECT account_id FROM members WHERE id=?').get(a.id).account_id,a.id);
+});
 console.log(JSON.stringify(results,null,2));
