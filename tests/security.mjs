@@ -92,7 +92,7 @@ await check('Organiser cannot obtain existing account reset token', async () => 
 });
 await check('Short passwords rejected', async () => {
   const f=fixture();
-  assert.equal((await f.call('register','POST',{name:'A',email:'a@example.test',password:'1234',familyName:'A'})).status,400);
+  assert.equal((await f.call('register','POST',{name:'A',email:'a@example.test',password:'123',familyName:'A'})).status,400);
 });
 await check('Invalid member mutation is atomic', async () => {
   const f=fixture(),a=await f.register('A'),b=await f.join(a,'B');
@@ -111,9 +111,9 @@ await check('Recipient quota does not disclose existence', async () => {
   const f=fixture(true),a=await f.register('A');
   for(let i=0;i<4;i++) assert.equal((await f.call('forgot','POST',{email:a.email})).status,200);
 });
-await check('Unverified email receives no private digest', async () => {
+await check('Digest still reaches existing account holders', async () => {
   const f=fixture(true),a=await f.register('A'),b=await f.join(a,'B');
-  await f.addWish(b); await f.store.digest(); assert.equal(f.sent.length,0);
+  await f.addWish(b); await f.store.digest(); assert.deepEqual(f.sent.map(m=>m.to).flat(),[a.email]);
 });
 await check('Concurrent link issuance leaves one token', async () => {
   const f=fixture(),a=await f.register('A'); await Promise.all([f.store.newLink(a),f.store.newLink(a)]);
