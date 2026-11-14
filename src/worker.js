@@ -17,6 +17,7 @@ import icon192 from '../public/icon-192x192.png';
 import icon512 from '../public/icon-512x512.png';
 import iconMaskable from '../public/icon-maskable-512x512.png';
 import mark from '../public/mark.webp';
+import ogImage from '../public/og.png';
 import fontInter from '../public/inter.woff2';
 import fontNewsreader from '../public/newsreader.woff2';
 import fontNewsreaderItalic from '../public/newsreader-italic.woff2';
@@ -26,6 +27,19 @@ const SESSION_AGE = 60 * 60 * 24 * 30;
 const LINK_AGE = 60 * 60 * 24 * 3;
 const COOKIE = '__Host-mikolaj';
 const TIERS = ['small', 'ok', 'good', 'angel'];
+const ROBOTS = `User-agent: facebookexternalhit
+User-agent: Facebot
+User-agent: WhatsApp
+User-agent: Twitterbot
+User-agent: Slackbot-LinkExpanding
+User-agent: Discordbot
+User-agent: TelegramBot
+User-agent: LinkedInBot
+Allow: /
+
+User-agent: *
+Disallow: /
+`;
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -568,10 +582,12 @@ export default {
       '/icon-512x512.png': [icon512, 'image/png'],
       '/icon-maskable-512x512.png': [iconMaskable, 'image/png'],
       '/mark.webp': [mark, 'image/webp'],
+      '/og.png': [ogImage, 'image/png'],
       '/inter.woff2': [fontInter, 'font/woff2'],
       '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
       '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
-      '/robots.txt': ['User-agent: *\nDisallow: /\n', 'text/plain; charset=utf-8'],
+      // wyszukiwarki nie, ale komunikatory mogą pobrać stronę i obrazek do podglądu linku
+      '/robots.txt': [ROBOTS, 'text/plain; charset=utf-8'],
     };
     const asset = assets[url.pathname];
     if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
