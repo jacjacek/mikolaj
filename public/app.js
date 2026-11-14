@@ -225,7 +225,9 @@ function vHead() {
       : `<button data-act="switch" data-id="${f.memberId}">${esc(f.name)}${f.isAdmin ? '<small>organizator</small>' : ''}</button>`).join('')}</div>` : ''}
     ${me().isAdmin ? `<button data-act="admin-mode">${god() ? 'Wyłącz tryb organizatora' : 'Tryb organizatora'}</button>` : ''}
     ${S.demo ? '' : '<button data-go="newfam">Nowa rodzina</button>'}
+    ${fams.length > 1 ? '<button data-act="leave">Opuść rodzinę</button>' : ''}
     <button data-act="logout">Wyloguj</button>
+    ${S.confirm?.act === 'leave' ? confirmBox('leave', '', `Opuścić rodzinę ${esc(S.data.family?.name)}? Znikną Twój list, życzenia i rezerwacje w tej rodzinie${managedBy(me().id).length ? ', a osoby, które prowadzisz, przejdą do organizatora' : ''}. Wrócić możesz tylko z nowym zaproszeniem.`, 'Opuść') : ''}
   </div></div></div>`;
 }
 
@@ -742,6 +744,10 @@ document.addEventListener('click', e => {
     case 'switch': {
       const f = (S.data.families || []).find(x => x.memberId === id);
       return act(async () => { await api('switch', 'POST', { memberId: id }); enterFamily(); }, f ? `Rodzina: ${f.name}` : null); }
+    case 'leave':
+      if (me().isAdmin) return toast('Jesteś tu organizatorem — najpierw przekaż tę rolę w zakładce Rodzina.');
+      if (!d.sure) { S.confirm = { act: 'leave' }; return render(); }
+      return act(async () => { await api('leave', 'POST'); enterFamily(); }, `Opuszczono rodzinę. Teraz: ${(S.data.families || []).find(f => f.memberId !== me().id)?.name || ''}`);
     case 'cancel-fam': S.token = null; S.info = null; return go('lists');
     case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 

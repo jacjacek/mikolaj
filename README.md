@@ -38,7 +38,7 @@ Children or grandparents don't need an account. Anyone allowed to add people can
 
 ### Several families, one account
 
-One e-mail and password can belong to any number of families — say, your own and your in-laws'. In each family you have a separate letter, wishes and role, so you can organise one family and simply take part in another. Tap your name (next to *Wyloguj*) to switch families or start a new one. Opening an invitation while signed in adds that family to your account; on the join form, entering an existing e-mail with its password does the same. Removing someone from a family only removes them from that family; the account disappears with its last family. The daily and December e-mails arrive once per account, with a section for each family.
+One e-mail and password can belong to any number of families — say, your own and your in-laws'. In each family you have a separate letter, wishes and role, so you can organise one family and simply take part in another. Tap your name (next to *Wyloguj*) to switch families or start a new one. Opening an invitation while signed in adds that family to your account; on the join form, entering an existing e-mail with its password does the same. You can also leave a family yourself (*Opuść rodzinę* in the same menu) — except your only family, and not while you are its organiser: hand the role over first. Removing someone from a family, or leaving it, only removes them from that family; the account disappears with its last family. The daily and December e-mails arrive once per account, with a section for each family.
 
 ### For the family organiser
 

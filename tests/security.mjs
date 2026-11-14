@@ -231,4 +231,28 @@ await check('Legacy members migrate to accounts', async () => {
   assert.equal(r.status,200);
   assert.equal(f.db.prepare('SELECT account_id FROM members WHERE id=?').get(a.id).account_id,a.id);
 });
+await check('Leaving a family', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.register('B'), c=await f.join(b,'C');
+  // jedyna rodzina — nie można
+  assert.equal((await f.call('leave','POST',{},c.cookie)).status,409);
+  const invite=(await f.call('admin','GET',undefined,b.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:invite},a.cookie);
+  const inB=(await f.call('state','GET',undefined,a.cookie)).body.user.id;
+  // A w rodzinie B prowadzi dziecko i rezerwuje prezent C
+  f.db.prepare('UPDATE members SET can_add=1 WHERE id=?').run(inB);
+  const kidId=(await f.call('members','POST',{name:'Kid'},a.cookie)).body.id;
+  const w=await f.addWish(c); await f.call(`wishes/${w}/reserve`,'POST',{},a.cookie);
+  const r=await f.call('leave','POST',{},a.cookie);
+  assert.equal(r.status,200); assert.equal(r.body.family,'A family');
+  const s=(await f.call('state','GET',undefined,a.cookie)).body;
+  assert.equal(s.user.id,a.id); assert.equal(s.families.length,1);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM members WHERE id=?').get(inB).n,0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM reservations WHERE wish_id=?').get(w).n,0);
+  assert.equal(f.db.prepare('SELECT managed_by FROM members WHERE id=?').get(kidId).managed_by,b.id);
+  // organizator nie opuszcza, dopóki nie przekaże roli
+  const inv2=(await f.call('admin','GET',undefined,a.cookie)).body.invite.split('=')[1];
+  await f.call('families/join','POST',{inviteToken:inv2},b.cookie);
+  await f.call('switch','POST',{memberId:b.id},b.cookie);
+  assert.equal((await f.call('leave','POST',{},b.cookie)).status,409);
+});
 console.log(JSON.stringify(results,null,2));

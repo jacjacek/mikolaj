@@ -293,6 +293,23 @@ export class FamilyStore extends DurableObject {
     }
     return { sent };
   }
+  // Usunięcie członka z rodziny (w transakcji): list, życzenia i rezerwacje znikają,
+  // prowadzone przez niego osoby przechodzą do `heirId`.
+  removeMember(target, heirId) {
+    this.sql.exec('DELETE FROM reservations WHERE member_id=? OR wish_id IN (SELECT id FROM wishes WHERE owner_id=?)', target.id, target.id);
+    this.sql.exec('DELETE FROM wishes WHERE owner_id=?', target.id);
+    // Konto w innych rodzinach zostaje zalogowane — sesje przechodzą do innej jego rodziny.
+    const other = target.account_id && this.one('SELECT id FROM members WHERE account_id=? AND id<>? ORDER BY rowid LIMIT 1', target.account_id, target.id);
+    if (other) {
+      this.sql.exec('UPDATE sessions SET member_id=?,admin_until=0 WHERE member_id=?', other.id, target.id);
+      this.sql.exec('UPDATE accounts SET last_member=? WHERE id=? AND last_member=?', other.id, target.account_id, target.id);
+    } else this.sql.exec('DELETE FROM sessions WHERE member_id=?', target.id);
+    this.sql.exec('DELETE FROM links WHERE member_id=?', target.id);
+    this.sql.exec('UPDATE members SET managed_by=? WHERE managed_by=?', heirId, target.id);
+    this.sql.exec('DELETE FROM members WHERE id=?', target.id);
+    // Ostatnia rodzina — konto znika razem z nią, jak dotąd.
+    if (target.account_id && !other) this.sql.exec('DELETE FROM accounts WHERE id=?', target.account_id);
+  }
   // Wszystkie rodziny konta (członkostwa), od najstarszego.
   memberships(accountId) {
     return this.rows('SELECT m.id,m.name,m.letter,m.family_id,m.is_admin,f.name AS family FROM members m JOIN family f ON f.id=m.family_id WHERE m.account_id=? ORDER BY m.rowid', accountId);
@@ -559,6 +576,21 @@ export class FamilyStore extends DurableObject {
       });
       return json({ ok: true, already });
     }
+    // Opuszczenie aktywnej rodziny. Nie dotyczy jedynej rodziny (to byłoby usunięcie konta)
+    // ani organizatora — ten najpierw przekazuje rolę, żeby rodzina nie została bez opiekuna.
+    if (method === 'POST' && path === '/api/leave') {
+      let next;
+      this.ctx.storage.transactionSync(() => {
+        const self = this.one('SELECT * FROM members WHERE id=?', me.id);
+        if (!self) fail(404, 'Nie należysz już do tej rodziny.');
+        next = this.one('SELECT m.id,f.name FROM members m JOIN family f ON f.id=m.family_id WHERE m.account_id=? AND m.id<>? ORDER BY m.rowid LIMIT 1', me.account_id, me.id);
+        if (!next) fail(409, 'To Twoja jedyna rodzina — nie możesz jej opuścić.');
+        if (self.is_admin) fail(409, 'Jesteś organizatorem — najpierw przekaż tę rolę komuś innemu w zakładce Rodzina.');
+        const heir = this.one('SELECT id FROM members WHERE family_id=? AND id<>? AND managed_by IS NULL ORDER BY is_admin DESC, rowid LIMIT 1', me.family_id, me.id);
+        this.removeMember(self, heir?.id ?? null);
+      });
+      return json({ ok: true, family: next.name });
+    }
 
     if (method === 'GET' && path === '/api/admin') { adminOnly(); return json(this.admin(me, url.origin)); }
     // Tryb organizatora: włączany ręcznie, tylko w tej sesji, wyłącza się sam po godzinie.
@@ -633,19 +665,7 @@ export class FamilyStore extends DurableObject {
       if (!memberMatch[2] && method === 'DELETE') {
         if (target.id === me.id) fail(400, 'Nie możesz usunąć siebie.');
         if (!me.is_admin && target.managed_by !== me.id) fail(403, 'Brak uprawnień.');
-        this.ctx.storage.transactionSync(() => {
-          this.sql.exec('DELETE FROM reservations WHERE member_id=? OR wish_id IN (SELECT id FROM wishes WHERE owner_id=?)', target.id, target.id);
-          this.sql.exec('DELETE FROM wishes WHERE owner_id=?', target.id);
-          // Konto w innych rodzinach zostaje zalogowane — sesje przechodzą do innej jego rodziny.
-          const other = target.account_id && this.one('SELECT id FROM members WHERE account_id=? AND id<>? ORDER BY rowid LIMIT 1', target.account_id, target.id);
-          if (other) this.sql.exec('UPDATE sessions SET member_id=?,admin_until=0 WHERE member_id=?', other.id, target.id);
-          else this.sql.exec('DELETE FROM sessions WHERE member_id=?', target.id);
-          this.sql.exec('DELETE FROM links WHERE member_id=?', target.id);
-          this.sql.exec('UPDATE members SET managed_by=? WHERE managed_by=?', me.id, target.id);
-          this.sql.exec('DELETE FROM members WHERE id=?', target.id);
-          // Ostatnia rodzina — konto znika razem z nią, jak dotąd.
-          if (target.account_id && !other) this.sql.exec('DELETE FROM accounts WHERE id=?', target.account_id);
-        });
+        this.ctx.storage.transactionSync(() => this.removeMember(target, me.id));
         return json({ ok: true });
       }
     }
