@@ -107,6 +107,7 @@ export class FamilyStore extends DurableObject {
       CREATE TABLE IF NOT EXISTS reservations (wish_id TEXT PRIMARY KEY REFERENCES wishes(id) ON DELETE CASCADE, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, purchased INTEGER NOT NULL DEFAULT 0, snapshot TEXT NOT NULL DEFAULT '{}');
       CREATE TABLE IF NOT EXISTS links (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS wishes_owner ON wishes(owner_id);
       CREATE INDEX IF NOT EXISTS reservations_member ON reservations(member_id);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
@@ -160,6 +161,34 @@ export class FamilyStore extends DurableObject {
         await sendMail(this.env, p.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${p.name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
         sent++;
       } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
+    }
+    return { sent };
+  }
+
+  // Codziennie w południe: co nowego dopisano na listach od poprzedniego razu — żeby przypomnieć o kupowaniu.
+  // Każdy dostaje tylko cudze, jeszcze wolne życzenia (nie swoje i nie te, które sam wpisał za kogoś).
+  async digest() {
+    const until = new Date().toISOString();
+    const since = this.one("SELECT value FROM meta WHERE key='digest'")?.value || new Date(Date.now() - 864e5).toISOString();
+    // Najpierw zapisujemy znacznik — ponowne uruchomienie nie wyśle drugi raz tego samego.
+    this.sql.exec("INSERT INTO meta(key,value) VALUES('digest',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", until);
+    const fresh = this.rows(`SELECT w.title,w.tier,w.owner_id,m.name AS owner,m.managed_by,m.family_id FROM wishes w JOIN members m ON m.id=w.owner_id
+      LEFT JOIN reservations r ON r.wish_id=w.id WHERE w.created_at>? AND w.created_at<=? AND r.wish_id IS NULL ORDER BY m.name,w.created_at`, since, until);
+    if (!fresh.length || !this.env.RESEND_API_KEY) return { sent: 0 };
+    let sent = 0;
+    const families = [...new Set(fresh.map(w => w.family_id))];
+    for (const fid of families) {
+      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL', fid)) {
+        const mine = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
+        if (!mine.length) continue;
+        const byOwner = {};
+        for (const w of mine) (byOwner[w.owner] ||= []).push(w.title);
+        const lines = ['Na listach pojawiły się nowe życzenia — może coś z tego kupisz?', ...Object.entries(byOwner).map(([o, t]) => `${o}: ${t.join(', ')}`)];
+        try {
+          await sendMail(this.env, p.email, { subject: 'Nowe życzenia na listach', heading: `Cześć, ${p.name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
+          sent++;
+        } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
+      }
     }
     return { sent };
   }
@@ -297,6 +326,7 @@ export class FamilyStore extends DurableObject {
     }
     // Wywołanie z harmonogramu (Worker blokuje /api/internal/ z zewnątrz).
     if (method === 'POST' && path === '/api/internal/remind') return json(await this.remind());
+    if (method === 'POST' && path === '/api/internal/digest') return json(await this.digest());
 
     // Jednorazowy link: nowe hasło albo przejęcie listy prowadzonej przez kogoś innego.
     const linkMatch = path.match(/^\/api\/link\/([a-f0-9]{64})$/);
@@ -511,9 +541,10 @@ export default {
     }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
   },
-  // Harmonogram (3 grudnia rano): przypomnienie przed Wigilią.
+  // Harmonogram: 3 grudnia — przypomnienie przed Wigilią; codziennie w południe — nowe życzenia.
   async scheduled(controller, env, ctx) {
-    const request = new Request('https://internal.invalid/api/internal/remind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const job = controller.cron === '0 9 3 12 *' ? 'remind' : 'digest';
+    const request = new Request(`https://internal.invalid/api/internal/${job}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     ctx.waitUntil(env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request));
   },
 };

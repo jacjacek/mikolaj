@@ -171,7 +171,8 @@ def main():
         print('Private bootstrap persisted before upload:', private)
     if not args.preview:
         # Przypomnienie przed Wigilią: 3 grudnia (trzy tygodnie wcześniej), 9:00 UTC.
-        api(prefix + f'/scripts/{name}/schedules', 'PUT', [{'cron': '0 9 3 12 *'}])
+        # Nowe życzenia: codziennie 11:00 UTC (południe zimą w Polsce).
+        api(prefix + f'/scripts/{name}/schedules', 'PUT', [{'cron': '0 9 3 12 *'}, {'cron': '0 11 * * *'}])
     if args.preview:
         if not args.ci:
             api(prefix + f'/scripts/{name}/subdomain', 'POST', {'enabled': True, 'previews_enabled': False})
