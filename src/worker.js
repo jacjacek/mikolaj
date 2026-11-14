@@ -120,6 +120,7 @@ export class FamilyStore extends DurableObject {
     addColumn('members', 'managed_by', 'TEXT');           // osoba bez konta — list prowadzi ten członek
     addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('wishes', 'tier', 'TEXT');
+    addColumn('reservations', 'reserved_at', 'INTEGER NOT NULL DEFAULT 0'); // do przypomnienia „masz to kupić”
     addColumn('sessions', 'admin_until', 'INTEGER NOT NULL DEFAULT 0'); // tryb organizatora — per sesja, wygasa sam
     this.sql.exec("UPDATE wishes SET tier = CASE WHEN price IS NULL THEN 'ok' WHEN price < 50 THEN 'small' WHEN price < 200 THEN 'ok' WHEN price <= 300 THEN 'good' ELSE 'angel' END WHERE tier IS NULL");
     this.sql.exec("UPDATE reservations SET snapshot=(SELECT json_object('title',title,'note',note,'url',url,'tier',tier) FROM wishes WHERE wishes.id=reservations.wish_id) WHERE snapshot='{}'");
@@ -165,27 +166,35 @@ export class FamilyStore extends DurableObject {
     return { sent };
   }
 
-  // Codziennie w południe: co nowego dopisano na listach od poprzedniego razu — żeby przypomnieć o kupowaniu.
-  // Każdy dostaje tylko cudze, jeszcze wolne życzenia (nie swoje i nie te, które sam wpisał za kogoś).
+  // Codziennie w południe, jeden mail na osobę (tylko gdy jest o czym pisać):
+  //  1) prezenty, które od poprzedniego razu wybrałem do kupienia i jeszcze nie kupiłem — przypomnienie,
+  //  2) nowe, wolne życzenia innych (nie moje i nie te, które sam wpisałem za kogoś).
   async digest() {
     const until = new Date().toISOString();
     const since = this.one("SELECT value FROM meta WHERE key='digest'")?.value || new Date(Date.now() - 864e5).toISOString();
     // Najpierw zapisujemy znacznik — ponowne uruchomienie nie wyśle drugi raz tego samego.
     this.sql.exec("INSERT INTO meta(key,value) VALUES('digest',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", until);
-    const fresh = this.rows(`SELECT w.title,w.tier,w.owner_id,m.name AS owner,m.managed_by,m.family_id FROM wishes w JOIN members m ON m.id=w.owner_id
+    if (!this.env.RESEND_API_KEY) return { sent: 0 };
+    const fresh = this.rows(`SELECT w.title,w.owner_id,m.name AS owner,m.managed_by,m.family_id FROM wishes w JOIN members m ON m.id=w.owner_id
       LEFT JOIN reservations r ON r.wish_id=w.id WHERE w.created_at>? AND w.created_at<=? AND r.wish_id IS NULL ORDER BY m.name,w.created_at`, since, until);
-    if (!fresh.length || !this.env.RESEND_API_KEY) return { sent: 0 };
+    const picks = this.rows(`SELECT r.member_id,w.title,m.name AS owner,m.family_id FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id
+      WHERE r.reserved_at>=? AND r.reserved_at<? AND r.purchased=0 ORDER BY m.name,w.created_at`, Math.floor(Date.parse(since) / 1000), Math.floor(Date.parse(until) / 1000));
+    const families = [...new Set([...fresh, ...picks].map(x => x.family_id))];
+    const byOwner = list => Object.entries(list.reduce((g, x) => ((g[x.owner] ||= []).push(x.title), g), {})).map(([o, t]) => `${o}: ${t.join(', ')}`);
     let sent = 0;
-    const families = [...new Set(fresh.map(w => w.family_id))];
     for (const fid of families) {
       for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL', fid)) {
-        const mine = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
-        if (!mine.length) continue;
-        const byOwner = {};
-        for (const w of mine) (byOwner[w.owner] ||= []).push(w.title);
-        const lines = ['Na listach pojawiły się nowe życzenia — może coś z tego kupisz?', ...Object.entries(byOwner).map(([o, t]) => `${o}: ${t.join(', ')}`)];
+        const mine = picks.filter(x => x.member_id === p.id);
+        const news = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
+        if (!mine.length && !news.length) continue;
+        const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
+        const lines = [];
+        if (mine.length) lines.push('Pamiętaj — wybrałeś(-aś) do kupienia:', ...byOwner(mine), `Wszystkich prezentów do kupienia: ${todo}.`);
+        if (news.length) lines.push(mine.length ? 'Na listach pojawiły się też nowe życzenia:' : 'Na listach pojawiły się nowe życzenia — może coś z tego kupisz?', ...byOwner(news));
         try {
-          await sendMail(this.env, p.email, { subject: 'Nowe życzenia na listach', heading: `Cześć, ${p.name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
+          await sendMail(this.env, p.email, mine.length
+            ? { subject: 'Pamiętaj o prezentach do kupienia', heading: `Cześć, ${p.name}`, lines, button: { label: 'Otwórz Kupuję', url: `${APP_URL}/#/kupuje` }, foot: 'Gdy coś kupisz, odhacz to w zakładce Kupuję. Raz dziennie, tylko gdy jest o czym przypomnieć.' }
+            : { subject: 'Nowe życzenia na listach', heading: `Cześć, ${p.name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
           sent++;
         } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
       }
@@ -491,8 +500,8 @@ export class FamilyStore extends DurableObject {
           if (reservation && !god) fail(409, 'Ktoś już wybrał ten prezent. Wybierz inny.');
           const snap = JSON.stringify({ title: w.title, note: w.note, url: w.url, tier: w.tier });
           // Odczyt i zapis bez await pomiędzy — atomowe w obrębie Durable Object.
-          if (reservation) this.sql.exec('UPDATE reservations SET member_id=?,snapshot=? WHERE wish_id=?', buyer.id, snap, w.id);
-          else this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot) VALUES(?,?,0,?)', w.id, buyer.id, snap);
+          if (reservation) this.sql.exec('UPDATE reservations SET member_id=?,snapshot=?,reserved_at=? WHERE wish_id=?', buyer.id, snap, now(), w.id);
+          else this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot,reserved_at) VALUES(?,?,0,?,?)', w.id, buyer.id, snap, now());
           return json({ ok: true });
         }
         if (!reservation || (reservation.member_id !== me.id && !god)) fail(403, 'Możesz zmieniać tylko swoje rezerwacje.');

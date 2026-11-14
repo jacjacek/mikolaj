@@ -23,4 +23,4 @@ Hasła: PBKDF2-SHA256 (100 000 iteracji). Sesje: losowy token, w bazie tylko has
 
 Push do `master` → https://list.do.mikolaja.pl (stary adres mikolaj.walasek.xyz przekierowuje), push do `develop` → https://mikolaj-preview.jac3k.workers.dev (osobne dane). Workflow `.github/workflows/deploy.yml` sprawdza składnię, wgrywa źródła i weryfikuje wdrożenie. Wersja: `/version.json`.
 
-Maile (Resend, nadawca listdo@mikolaja.pl): link do nowego hasła, zaproszenie od organizatora, codziennie w południe nowe (wolne) życzenia od bliskich i przypomnienie 3 grudnia. Nigdy nie zdradzają, co kto komu kupuje. **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.
+Maile (Resend, nadawca listdo@mikolaja.pl): link do nowego hasła, zaproszenie od organizatora, codziennie w południe przypomnienie o prezentach, które wybrałeś do kupienia, i nowe (wolne) życzenia od bliskich i przypomnienie 3 grudnia. Nigdy nie zdradzają, co kto komu kupuje. **Nie zmieniaj nazwy Workera, klasy `FamilyStore` ani identyfikatora `family-v1`** — odłączyłoby to aplikację od istniejących danych.
