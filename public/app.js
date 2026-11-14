@@ -413,7 +413,7 @@ function vFamily() {
   if (S.famView === 'buyer') {
     resHtml = accounts.map(b => {
       const rs = A.reservations.filter(r => r.buyerId === b.id);
-      
+
       const you = b.id === me().id ? ' <span class="you">(Ty)</span>' : '';
       if (!rs.length) return `<div class="res-group"><h3>${esc(b.name)}${you}</h3><p class="empty">Nic jeszcze nie kupuje.</p></div>`;
       return `<div class="res-group"><h3>${esc(b.name)}${you}<span>${rs.filter(r => r.purchased).length} z ${rs.length} kupione</span></h3>
@@ -439,7 +439,7 @@ function vFamily() {
     const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
-        
+
         <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>`}
