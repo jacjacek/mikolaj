@@ -520,7 +520,7 @@ function vAuth() {
   const I = S.info || {};
   const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
       <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">`;
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">`;
   if (S.screen === 'register') return `${PUB()}<section class="auth fade">
     <h1 class="title">Załóż rodzinę</h1>
     <p class="sub">Zostajesz organizatorem: zapraszasz bliskich linkiem i możesz dodać osoby bez telefonu.</p>
@@ -537,7 +537,7 @@ function vAuth() {
     <form class="form" data-form="join">
       <input class="in" name="name" placeholder="Imię" maxlength="60" required autocomplete="given-name">
       <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">
+      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Dołączam</button></div>
     </form>
   </section>`;
@@ -546,7 +546,7 @@ function vAuth() {
     <p class="sub">${I.needsEmail ? 'Ustaw e-mail i hasło — od teraz sam(a) prowadzisz swoją listę.' : 'Ustaw nowe hasło.'}</p>
     <form class="form" data-form="link">
       ${I.needsEmail ? '<input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">' : ''}
-      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 15 znaków" minlength="15" required autocomplete="new-password">
+      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
   </section>`;

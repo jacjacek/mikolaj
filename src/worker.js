@@ -72,7 +72,7 @@ const email = value => {
   return e;
 };
 const password = value => {
-  if (typeof value !== 'string' || value.length < 15 || value.length > 256) fail(400, 'Hasło musi mieć co najmniej 15 znaków.');
+  if (typeof value !== 'string' || value.length < 4 || value.length > 256) fail(400, 'Hasło musi mieć co najmniej 4 znaki.');
   return value;
 };
 function wishFields(body) {
@@ -148,7 +148,6 @@ export class FamilyStore extends DurableObject {
       if (!this.rows(`PRAGMA table_info(${table})`).some(c => c.name === column)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     };
     addColumn('reservations', 'snapshot', "TEXT NOT NULL DEFAULT '{}'");
-    addColumn('members', 'email_verified', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('members', 'managed_by', 'TEXT');           // osoba bez konta — list prowadzi ten członek
     addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
     addColumn('wishes', 'tier', 'TEXT');
@@ -191,7 +190,7 @@ export class FamilyStore extends DurableObject {
     if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
     this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?)', `remind:${year}`, now() + 60 * 60 * 24 * 300);
     let sent = 0;
-    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL AND email_verified=1')) {
+    for (const p of this.rows('SELECT id,name,email,letter FROM members WHERE managed_by IS NULL')) {
       const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
       const wishes = this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', p.id).n;
       const lines = [];
@@ -231,7 +230,7 @@ export class FamilyStore extends DurableObject {
     };
     let sent = 0;
     for (const fid of families) {
-      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL AND email_verified=1', fid)) {
+      for (const p of this.rows('SELECT id,name,email FROM members WHERE family_id=? AND managed_by IS NULL', fid)) {
         const mine = picks.filter(x => x.member_id === p.id);
         const news = fresh.filter(w => w.family_id === fid && w.owner_id !== p.id && w.managed_by !== p.id);
         if (!mine.length && !news.length) continue;
@@ -416,7 +415,7 @@ export class FamilyStore extends DurableObject {
         member = find();
         if (!member) fail(404, 'Ten link wygasł albo został już użyty.');
         if (this.one('SELECT id FROM members WHERE email=? AND id<>?', e, member.id)) fail(409, 'Ten adres jest już używany.');
-        this.sql.exec('UPDATE members SET email_verified=CASE WHEN managed_by IS NULL THEN 1 ELSE 0 END,email=?,salt=?,password_hash=?,managed_by=NULL WHERE id=?', e, salt, pw, member.id);
+        this.sql.exec('UPDATE members SET email=?,salt=?,password_hash=?,managed_by=NULL WHERE id=?', e, salt, pw, member.id);
         this.sql.exec('DELETE FROM links WHERE member_id=?', member.id);
         this.sql.exec('DELETE FROM sessions WHERE member_id=?', member.id);
       });
@@ -502,7 +501,6 @@ export class FamilyStore extends DurableObject {
         if (body.admin === true) {
           if (target.managed_by) fail(400, 'Organizator musi mieć własne konto.');
           {
-            this.sql.exec('DELETE FROM links WHERE member_id IN (SELECT id FROM members WHERE family_id=?)', me.family_id);
             this.sql.exec('UPDATE members SET is_admin=0 WHERE family_id=?', me.family_id);
             this.sql.exec('UPDATE members SET is_admin=1 WHERE id=?', target.id);
           }
