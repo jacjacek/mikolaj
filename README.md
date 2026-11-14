@@ -61,7 +61,7 @@ No e-mail ever reveals who is buying what for whom.
 ```
 public/            frontend — plain HTML, CSS and ES-module JavaScript, no build step
   index.html       includes the pre-rendered landing page, so it paints before any JavaScript
-  app.css
+  app.css          inlined into the HTML by the Worker (nonce'd <style>), also served on its own
   app.js
   *.woff2          self-hosted Inter and Newsreader, subset to Latin + Polish
   *.png, *.webp, favicon.ico, site.webmanifest   icons and web-app manifest

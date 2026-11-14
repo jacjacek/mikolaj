@@ -62,9 +62,11 @@ def verify(base, revision, branch):
     csp = headers.get('Content-Security-Policy', '')
     nonce = re.fullmatch(r".*script-src 'self' 'nonce-([A-Za-z0-9+/]+={0,2})'.*", csp)
     assert nonce, 'Missing CSP nonce'
-    assert csp.replace(f" 'nonce-{nonce[1]}'", '', 1) == worker_csp(), 'CSP was weakened or changed'
+    assert f"style-src 'self' 'nonce-{nonce[1]}'" in csp, 'Missing CSP style nonce'
+    assert csp.replace(f" 'nonce-{nonce[1]}'", '', 2) == worker_csp(), 'CSP was weakened or changed'
     source = (ROOT / 'public/index.html').read_text(encoding='utf-8')
-    tagged = source.replace('<script', f'<script nonce="{nonce[1]}"')
+    css = (ROOT / 'public/app.css').read_text(encoding='utf-8')
+    tagged = source.replace('<script', f'<script nonce="{nonce[1]}"').replace('<link rel="stylesheet" href="/app.css">', f'<style nonce="{nonce[1]}">{css}</style>')
     # Cloudflare may inject its own nonce'd scripts; everything from the source must be present unchanged.
     html = body.decode('utf-8')
     assert all(line.strip() in html for line in tagged.splitlines()), 'Source mismatch: index.html'

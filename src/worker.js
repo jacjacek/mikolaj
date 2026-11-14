@@ -631,11 +631,13 @@ export default {
     if (asset[0] === html && request.method === 'GET') {
       // Nonce na odpowiedź — Cloudflare może wstrzyknąć swój skrypt bez 'unsafe-inline'.
       const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-      let body = html.replaceAll('<script', `<script nonce="${nonce}"`);
+      let body = html.replaceAll('<script', `<script nonce="${nonce}"`)
+        // CSS wbudowany w HTML — tekst maluje się bez czekania na osobne pobranie arkusza
+        .replace('<link rel="stylesheet" href="/app.css">', () => `<style nonce="${nonce}">${css}</style>`);
       // Zalogowany nie powinien mignąć stroną startową, która leży gotowa w HTML.
       const session = request.headers.get('Cookie')?.split(';').some(v => v.trim().startsWith(`${COOKIE}=`));
       if (session) body = body.replace('<main id="app" class="pre">', '<main id="app" class="pre" hidden>');
-      return new Response(body, { headers: { ...headers, 'Content-Security-Policy': SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`) } });
+      return new Response(body, { headers: { ...headers, 'Content-Security-Policy': SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`).replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`) } });
     }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
   },
