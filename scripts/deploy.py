@@ -140,7 +140,7 @@ def main():
     # Każdy plik z public/: tekst jako moduł tekstowy, obrazy jako moduł danych (ArrayBuffer).
     for path in sorted((ROOT / 'public').iterdir()):
         if path.is_file():
-            binary = path.suffix in ('.png', '.ico')
+            binary = path.suffix in ('.png', '.ico', '.webp', '.woff2')
             parts.append(('public/' + path.name, 'application/octet-stream' if binary else 'text/plain', path.read_bytes()))
     payload, content_type = multipart(parts)
     deployed = api(prefix + f'/scripts/{name}', 'PUT', raw=payload, content_type=content_type)

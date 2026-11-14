@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mikołaj</title>
+  <meta name="description" content="Rodzinne listy do Mikołaja: każdy pisze, o czym marzy, bliscy po cichu wybierają prezenty — nic się nie powtórzy, a niespodzianka zostaje niespodzianką.">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#ffffff">
@@ -18,13 +19,44 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Mikołaj">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&amp;family=Inter:wght@400;500&amp;display=swap">
+  <link rel="preload" href="/inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/newsreader.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
+  <script>
+    // Przed pierwszym malowaniem: zapamiętany motyw i ukrycie gotowej strony startowej, gdy adres prowadzi gdzie indziej.
+    try { const t = localStorage.getItem('mikolaj.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch {}
+    if (!/^(#\/?)?$/.test(location.hash)) document.documentElement.classList.add('deep');
+  </script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <main id="app"></main>
+  <main id="app" class="pre"><div class="topbar"><header class="head pub">
+    <button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/mark.webp" alt="" width="36" height="36"></button>
+    <div class="right"><button class="theme" data-act="theme" aria-label="Zmień motyw" title="Zmień motyw"><svg class="sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v2.1M10 16.1v2.1M1.8 10h2.1M16.1 10h2.1M4.2 4.2l1.5 1.5M14.3 14.3l1.5 1.5M4.2 15.8l1.5-1.5M14.3 5.7l1.5-1.5"/></svg><svg class="moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1Z"/></svg></button><button class="a line" data-go="login">Zaloguj się</button></div>
+  </header></div>
+  <section class="landing">
+    <div class="hero-grid"><div>
+    <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
+    <p class="lead">Każdy pisze, o czym marzy. Bliscy wybierają, na co kto zasłużył, i dają znać, że to kupują — więc nic się nie powtórzy, a prezent zostaje niespodzianką.</p>
+    <p class="sub" data-eve>&nbsp;</p>
+    <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-act="demo">Zobacz przykład</button></div>
+    </div><p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p></div>
+    <h2 class="label">Jak to działa</h2>
+    <div class="points">
+    <div class="point"><h3>Każdy pisze list</h3><p>Kilka zdań do Mikołaja i lista życzeń.</p></div>
+    <div class="point"><h3>Bliscy wybierają prezent</h3><p>Kto chce, rezerwuje kupienie komuś prezentu.</p></div>
+    <div class="point"><h3>Niespodzianka zostaje niespodzianką</h3><p>Nie widzisz, co inni kupują — tylko swoje.</p></div>
+    <div class="point"><h3>Także za dziadków i dzieci</h3><p>Bez wykluczania — da się wpisać list za kogoś.</p></div>
+    </div>
+    <div class="start-grid"><div>
+    <h2 class="label">Jak zacząć</h2>
+    <p class="fam-text">Załóż rodzinę — zostajesz jej organizatorem. Potem wyślij bliskim link zaproszenia, a dziadków czy dzieci dodaj sam. Każda rodzina widzi tylko swoje listy.</p>
+    <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-go="login">Mam już konto</button></div>
+    </div><div>
+    <h2 class="label">Wypróbuj</h2>
+    <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
+    <div class="actions mt"><button class="a line" data-act="demo">Otwórz przykładową rodzinę</button></div>
+    </div></div>
+  </section></main>
 </body>
 </html>

@@ -11,7 +11,6 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {'master': 'https://list.do.mikolaja.pl'}
 AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
-APP_SCRIPT = '<script type="module" src="/app.js"></script>'
 
 
 def fetch(base, path):
@@ -65,7 +64,7 @@ def verify(base, revision, branch):
     assert nonce, 'Missing CSP nonce'
     assert csp.replace(f" 'nonce-{nonce[1]}'", '', 1) == worker_csp(), 'CSP was weakened or changed'
     source = (ROOT / 'public/index.html').read_text(encoding='utf-8')
-    tagged = source.replace(APP_SCRIPT, APP_SCRIPT.replace('></script>', f' nonce="{nonce[1]}"></script>'))
+    tagged = source.replace('<script', f'<script nonce="{nonce[1]}"')
     # Cloudflare may inject its own nonce'd scripts; everything from the source must be present unchanged.
     html = body.decode('utf-8')
     assert all(line.strip() in html for line in tagged.splitlines()), 'Source mismatch: index.html'

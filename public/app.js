@@ -29,9 +29,9 @@ const S = {
 };
 let theme = 'auto';
 const isDark = () => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-const SUN = '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v2.1M10 16.1v2.1M1.8 10h2.1M16.1 10h2.1M4.2 4.2l1.5 1.5M14.3 14.3l1.5 1.5M4.2 15.8l1.5-1.5M14.3 5.7l1.5-1.5"/></svg>';
-const MOON = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1Z"/></svg>';
-const themeBtn = () => `<button class="theme" data-act="theme" aria-label="${isDark() ? 'Włącz jasny tryb' : 'Włącz ciemny tryb'}" title="${isDark() ? 'Jasny tryb' : 'Ciemny tryb'}">${isDark() ? SUN : MOON}</button>`;
+const SUN = '<svg class="sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><path d="M10 1.8v2.1M10 16.1v2.1M1.8 10h2.1M16.1 10h2.1M4.2 4.2l1.5 1.5M14.3 14.3l1.5 1.5M4.2 15.8l1.5-1.5M14.3 5.7l1.5-1.5"/></svg>';
+const MOON = '<svg class="moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1Z"/></svg>';
+const themeBtn = () => `<button class="theme" data-act="theme" aria-label="${isDark() ? 'Włącz jasny tryb' : 'Włącz ciemny tryb'}" title="${isDark() ? 'Jasny tryb' : 'Ciemny tryb'}">${SUN}${MOON}</button>`; // ikonę wybiera CSS
 try { theme = localStorage.getItem('mikolaj.theme') || 'auto'; } catch {}
 
 const me = () => S.data.user;
@@ -515,7 +515,7 @@ function vEdit() {
   </section>`;
 }
 
-const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/favicon-96x96.png" alt="" width="36" height="36"></button>';
+const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/mark.webp" alt="" width="36" height="36"></button>';
 const PUB = () => `<div class="topbar"><header class="head pub">${MARK}${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
@@ -573,38 +573,16 @@ function vAuth() {
   </section>`;
 }
 
-// strona startowa dla niezalogowanych
+// strona startowa dla niezalogowanych — jej treść leży gotowa w index.html (pierwsze malowanie bez czekania na JS)
+const LANDING = $('#app').innerHTML;
 function vLanding() {
+  const t = document.createElement('template');
+  t.innerHTML = LANDING;
   const d = daysToEve();
-  const point = (h, t) => `<div class="point"><h3>${h}</h3><p>${t}</p></div>`;
-  return `<div class="topbar"><header class="head pub">
-    ${MARK}
-    <div class="right">${themeBtn()}<button class="a line" data-go="login">Zaloguj się</button></div>
-  </header></div>
-  <section class="landing fade">
-    <div class="hero-grid"><div>
-    <h1 class="hero">Listy do Mikołaja dla całej rodziny.</h1>
-    <p class="lead">Każdy pisze, o czym marzy. Bliscy wybierają, na co kto zasłużył, i dają znać, że to kupują — więc nic się nie powtórzy, a prezent zostaje niespodzianką.</p>
-    <p class="sub">${d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia'}</p>
-    <div class="actions cta"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-act="demo">Zobacz przykład</button></div>
-    </div><p class="sample"><span>Drogi Mikołaju,</span> w tym roku dużo czytam i uczę się piec chleb. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!</p></div>
-    <h2 class="label">Jak to działa</h2>
-    <div class="points">
-    ${point('Każdy pisze list', 'Kilka zdań do Mikołaja i lista życzeń.')}
-    ${point('Bliscy wybierają prezent', 'Kto chce, rezerwuje kupienie komuś prezentu.')}
-    ${point('Niespodzianka zostaje niespodzianką', 'Nie widzisz, co inni kupują — tylko swoje.')}
-    ${point('Także za dziadków i dzieci', 'Bez wykluczania — da się wpisać list za kogoś.')}
-    </div>
-    <div class="start-grid"><div>
-    <h2 class="label">Jak zacząć</h2>
-    <p class="fam-text">Załóż rodzinę — zostajesz jej organizatorem. Potem wyślij bliskim link zaproszenia, a dziadków czy dzieci dodaj sam. Każda rodzina widzi tylko swoje listy.</p>
-    <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-go="login">Mam już konto</button></div>
-    </div><div>
-    <h2 class="label">Wypróbuj</h2>
-    <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
-    <div class="actions mt"><button class="a line" data-act="demo">Otwórz przykładową rodzinę</button></div>
-    </div></div>
-  </section>`;
+  t.content.querySelector('[data-eve]').textContent = d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia';
+  t.content.querySelector('.theme').outerHTML = themeBtn();
+  t.content.querySelector('.landing').classList.add('fade');
+  return t.innerHTML;
 }
 
 /* ===================== RENDER ===================== */
@@ -623,7 +601,15 @@ function render(animate = false) {
   if ((S.screen === 'family' || S.screen === 'edit') && !me()?.isAdmin) S.screen = 'lists';
   scheduleModeEnd();
   const view = !loggedIn ? vAuth() : { lists: vLists, buying: vBuying, mine: vMine, family: vFamily, edit: vEdit }[S.screen]();
-  $('#app').innerHTML = view;
+  const el = $('#app');
+  if (el.classList.contains('pre')) {
+    // pierwszy render: gotowa strona startowa już widać — bez ponownego wjazdu
+    if (S.screen === 'landing' && !el.hidden && !document.documentElement.classList.contains('deep')) animate = false;
+    el.classList.remove('pre');
+    el.hidden = false;
+    document.documentElement.classList.remove('deep');
+  }
+  el.innerHTML = view;
   if (!animate) { $('.fade')?.classList.remove('fade'); window.scrollTo(0, y); }
   markFits();
   syncTop();

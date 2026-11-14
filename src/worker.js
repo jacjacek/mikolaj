@@ -16,6 +16,10 @@ import touch167 from '../public/apple-touch-icon-167x167.png';
 import icon192 from '../public/icon-192x192.png';
 import icon512 from '../public/icon-512x512.png';
 import iconMaskable from '../public/icon-maskable-512x512.png';
+import mark from '../public/mark.webp';
+import fontInter from '../public/inter.woff2';
+import fontNewsreader from '../public/newsreader.woff2';
+import fontNewsreaderItalic from '../public/newsreader-italic.woff2';
 
 const encoder = new TextEncoder();
 const SESSION_AGE = 60 * 60 * 24 * 30;
@@ -28,7 +32,7 @@ const SECURITY = {
   'X-Frame-Options': 'DENY',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Strict-Transport-Security': 'max-age=31536000',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'",
 };
 class AppError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -563,16 +567,24 @@ export default {
       '/icon-192x192.png': [icon192, 'image/png'],
       '/icon-512x512.png': [icon512, 'image/png'],
       '/icon-maskable-512x512.png': [iconMaskable, 'image/png'],
+      '/mark.webp': [mark, 'image/webp'],
+      '/inter.woff2': [fontInter, 'font/woff2'],
+      '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
+      '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
       '/robots.txt': ['User-agent: *\nDisallow: /\n', 'text/plain; charset=utf-8'],
     };
     const asset = assets[url.pathname];
     if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
-    // ikony mogą leżeć w pamięci przeglądarki dzień; kod i HTML zawsze sprawdzane na nowo
-    const headers = { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': asset[1].startsWith('image/') ? 'public, max-age=86400' : 'no-cache' };
+    // ikony i fonty leżą w pamięci przeglądarki rok (nowa wersja pliku = nowa nazwa); kod i HTML zawsze sprawdzane na nowo
+    const lasting = asset[1].startsWith('image/') || asset[1].startsWith('font/');
+    const headers = { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': lasting ? 'public, max-age=31536000, immutable' : 'no-cache' };
     if (asset[0] === html && request.method === 'GET') {
       // Nonce na odpowiedź — Cloudflare może wstrzyknąć swój skrypt bez 'unsafe-inline'.
       const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-      const body = html.replace('<script type="module" src="/app.js"></script>', `<script type="module" src="/app.js" nonce="${nonce}"></script>`);
+      let body = html.replaceAll('<script', `<script nonce="${nonce}"`);
+      // Zalogowany nie powinien mignąć stroną startową, która leży gotowa w HTML.
+      const session = request.headers.get('Cookie')?.split(';').some(v => v.trim().startsWith(`${COOKIE}=`));
+      if (session) body = body.replace('<main id="app" class="pre">', '<main id="app" class="pre" hidden>');
       return new Response(body, { headers: { ...headers, 'Content-Security-Policy': SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`) } });
     }
     return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
