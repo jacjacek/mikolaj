@@ -185,6 +185,9 @@ textarea.in.big { min-height: 220px; font: 400 1.1875rem/1.55 var(--serif); }
 /* pisany list: niższe pole, rośnie z treścią — pod nim widać jeszcze „Dodaj życzenie” */
 .letter-form textarea.in.big { min-height: 132px; max-height: 60vh; resize: none; }
 .hint { color: var(--faint); font-size: 0.875rem; margin: 0; max-width: 34em; }
+.wish-no { font: 400 1.375rem/1.3 var(--serif); margin: 4px 0 2px; }
+.wish-no span { display: block; font: 400 0.875rem/1.45 var(--sans); color: var(--soft); margin-top: 4px; }
+.many { margin: -2px 0 2px; padding: 10px 12px; border-radius: var(--r); font-size: 0.9375rem; background: color-mix(in srgb, var(--ink) 7%, transparent); }
 .saved { color: var(--faint); font-size: 0.875rem; margin: -4px 0 0; min-height: 1.4em; }
 select.in { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 40px; background-repeat: no-repeat; background-position: right 16px center; background-image: var(--chev); }
 select.in:invalid { color: var(--faint); }

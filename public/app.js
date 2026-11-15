@@ -131,6 +131,9 @@ function queueWish(form) {
     if (del) { del.dataset.id = id; del.hidden = false; }
   });
 }
+// kilka prezentów w jednym życzeniu: wyliczanka w tytule albo wypunktowana lista we wskazówkach
+const looksLikeMany = form => /[,;+]/.test(form.querySelector('#f-title').value)
+  || (form.querySelector('#f-note').value.match(/^\s*([-–•*]|\d+[.)])\s/gm) || []).length >= 2;
 const grow = t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; };
 document.addEventListener('input', e => {
   const t = e.target;
@@ -138,7 +141,11 @@ document.addEventListener('input', e => {
     const owner = t.dataset.owner, letter = t.value.trim();
     grow(t);
     scheduleSave(() => api(`members/${owner}/letter`, 'PATCH', { letter }));
-  } else if (t.closest('.wish-form')) queueWish(t.closest('.wish-form'));
+  } else if (t.closest('.wish-form')) {
+    const form = t.closest('.wish-form');
+    if (t.id === 'f-title' || t.id === 'f-note') form.querySelector('.many').hidden = !looksLikeMany(form);
+    queueWish(form);
+  }
 });
 // wyjście z pola zapisuje od razu
 document.addEventListener('focusout', e => { if (pending && e.target.closest?.('.wish-form, .letter-form')) flushSave(); });
@@ -258,9 +265,13 @@ function vLists() {
   </section>`;
 }
 
+// Jedno życzenie = jeden prezent — w testach ktoś wpisał wszystkie prezenty w jedno pole,
+// więc formularz mówi to wprost: numer życzenia, etykieta, ostrzeżenie przy liście po przecinku.
 function wishForm(w, isNew) {
   return `<div class="form wish-form" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">
-    ${field('Co chcesz dostać?', `<input class="in" id="f-title" value="${esc(w.title)}" maxlength="160">`)}
+    ${isNew ? `<p class="wish-no">Życzenie ${wishesOf(w.ownerId).length + 1}<span>Jeden prezent. Każdy kolejny dodasz osobno — bliscy wybierają je pojedynczo.</span></p>` : ''}
+    ${field('Jeden prezent — co to ma być?', `<input class="in" id="f-title" value="${esc(w.title)}" maxlength="160" placeholder="np. ciepły szal">`)}
+    <p class="many" hidden>Wygląda na kilka prezentów. Wpisz tu jeden, a kolejne dodaj osobno przyciskiem „Dodaj kolejne” — wtedy bliscy mogą wybrać każdy z osobna.</p>
     ${field('Wskazówki — rozmiar, kolor, marka', `<textarea class="in" id="f-note" maxlength="1500">${esc(w.note)}</textarea>`)}
     ${field('Ile może kosztować?', `<select class="in" id="f-tier" required>
       <option value="" disabled ${w.tier ? '' : 'selected'}>Wybierz</option>
@@ -269,6 +280,7 @@ function wishForm(w, isNew) {
     ${field('Link do sklepu — jeśli masz', `<input class="in" id="f-url" value="${esc(w.url)}" placeholder="https://" maxlength="2000" inputmode="url">`)}
     <div class="actions">
       <button class="a solid" data-act="done-wish">Gotowe</button>
+      ${isNew ? '<button class="a line" data-act="done-wish" data-next="1">Dodaj kolejne</button>' : ''}
       <button class="a line push" data-act="delete-wish" data-id="${isNew ? '' : w.id}" ${isNew ? 'hidden' : ''}>Usuń</button>
     </div>
     <p class="saved" role="status">${isNew ? 'Zapisze się samo, gdy wpiszesz, co i za ile.' : 'Zmiany zapisują się same.'}</p>
@@ -765,7 +777,9 @@ document.addEventListener('click', e => {
       const form = t.closest('.wish-form');
       if (!form.dataset.id && form.querySelector('#f-title').value.trim() && !form.querySelector('#f-tier').value) {
         saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return form.querySelector('#f-tier').focus(); }
-      return settle(() => { if (saveError) return false; S.adding = null; S.editWish = null; S.confirm = null; }); }
+      const next = d.next && form.dataset.owner;
+      return settle(() => { if (saveError) return false; S.adding = next || null; S.editWish = null; S.confirm = null; })
+        .then(() => { if (next && S.adding) { $('.wish-form')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); focusFirst(); } }); }
     case 'done-letter': return settle(() => { if (saveError) return false; S.editLetter = null; });
     case 'delete-wish':
       if (!d.sure) return settle(() => { S.confirm = { act: 'delete-wish', id: t.dataset.id }; });
