@@ -8,8 +8,9 @@ on:
 permissions:
   contents: read
 
+# Jedno wdrożenie naraz; z oczekujących zostaje tylko najnowsze, więc starszy commit nigdy nie nadpisze nowszego.
 concurrency:
-  group: mikolaj-${{ github.ref_name }}
+  group: mikolaj-deploy
   cancel-in-progress: false
 
 jobs:
@@ -18,47 +19,18 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
-      - name: Checkout exact pushed commit
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12'
-      - name: Check JavaScript syntax on hosted runner
-        shell: bash
+      - name: Check syntax and run security tests
         run: |
           set -euo pipefail
-          for file in public/app.js src/worker.js; do
-            node --input-type=module --check < "$file"
-          done
-      - name: Refuse superseded runs while holding deployment concurrency lock
-        id: branch_head
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/branch_head_guard.py --repository "$GITHUB_REPOSITORY" --ref "$GITHUB_REF" --revision "$GITHUB_SHA"
-      - name: Upload source to the existing Cloudflare Worker
-        if: steps.branch_head.outputs.deploy == 'true'
+          for file in public/app.js public/demo.js src/worker.js; do node --input-type=module --check < "$file"; done
+          node tests/security.mjs
+      - name: Deploy to Cloudflare
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python scripts/deploy.py --ci --account "$CLOUDFLARE_ACCOUNT_ID" --zone "$CLOUDFLARE_ZONE_ID" --revision "$GITHUB_SHA" --branch "$GITHUB_REF_NAME"
-      - name: Verify public revision, frontend bytes, CSP and protected API
-        if: steps.branch_head.outputs.deploy == 'true'
-        run: python scripts/verify_deployment.py --revision "$GITHUB_SHA" --branch "$GITHUB_REF_NAME"
-      - name: Superseded deployment summary
-        if: steps.branch_head.outputs.deploy == 'false'
-        shell: bash
-        run: |
-          printf '### Deployment skipped\n- Reason: this run is superseded by the current remote branch head.\n- Branch: `%s`\n- Skipped commit: `%s`\n- No upload or deployment verification was performed.\n' "$GITHUB_REF_NAME" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
-      - name: Deployment summary
-        if: steps.branch_head.outputs.deploy == 'true'
-        shell: bash
-        run: |
-          url=https://list.do.mikolaja.pl
-          printf '### Verified deployment\n- Site: %s\n- Commit: `%s`\n- Version: %s/version.json\n' "$url" "$GITHUB_SHA" "$url" >> "$GITHUB_STEP_SUMMARY"
+        run: npx --yes wrangler@4.162.0 deploy --var "DEPLOY_REVISION:$GITHUB_SHA"
+      - name: Verify the live revision, files, CSP and anonymous API
+        run: python3 scripts/verify_deployment.py --revision "$GITHUB_SHA"

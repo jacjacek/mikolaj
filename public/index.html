@@ -5,39 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mikołaj — listy do Mikołaja dla całej rodziny</title>
   <meta name="description" content="Rodzinne listy do Mikołaja: każdy pisze, o czym marzy, bliscy po cichu wybierają prezenty — nic się nie powtórzy, a niespodzianka zostaje niespodzianką.">
-  <link rel="canonical" href="https://list.do.mikolaja.pl/">
+  <link rel="canonical" href="{{ORIGIN}}/">
   <!-- podgląd linku w komunikatorach -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Mikołaj">
   <meta property="og:locale" content="pl_PL">
-  <meta property="og:url" content="https://list.do.mikolaja.pl/">
+  <meta property="og:url" content="{{ORIGIN}}/">
   <meta property="og:title" content="Listy do Mikołaja dla całej rodziny">
   <meta property="og:description" content="Każdy pisze, o czym marzy. Bliscy po cichu wybierają prezenty — nic się nie powtórzy, a niespodzianka zostaje niespodzianką.">
-  <meta property="og:image" content="https://list.do.mikolaja.pl/og.png">
+  <meta property="og:image" content="{{ORIGIN}}/og.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="Znaczek z czapką Mikołaja i napis: Listy do Mikołaja dla całej rodziny.">
   <meta name="twitter:card" content="summary_large_image">
   <script type="application/ld+json">
-    {"@context": "https://schema.org", "@type": "WebApplication", "name": "Mikołaj", "alternateName": "Listy do Mikołaja", "url": "https://list.do.mikolaja.pl/", "description": "Rodzinne listy do Mikołaja: każdy pisze, o czym marzy, bliscy po cichu wybierają prezenty — nic się nie powtórzy, a niespodzianka zostaje niespodzianką.", "inLanguage": "pl", "applicationCategory": "LifestyleApplication", "operatingSystem": "Web", "image": "https://list.do.mikolaja.pl/og.png", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "PLN"}}
+    {"@context": "https://schema.org", "@type": "WebApplication", "name": "Mikołaj", "alternateName": "Listy do Mikołaja", "url": "{{ORIGIN}}/", "description": "Rodzinne listy do Mikołaja: każdy pisze, o czym marzy, bliscy po cichu wybierają prezenty — nic się nie powtórzy, a niespodzianka zostaje niespodzianką.", "inLanguage": "pl", "applicationCategory": "LifestyleApplication", "operatingSystem": "Web", "image": "{{ORIGIN}}/og.png", "offers": {"@type": "Offer", "price": "0", "priceCurrency": "PLN"}}
   </script>
   <meta name="referrer" content="no-referrer">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#161616" media="(prefers-color-scheme: dark)">
   <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64">
-  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48x48.png">
-  <link rel="icon" type="image/png" sizes="96x96" href="/favicon-96x96.png">
-  <link rel="apple-touch-icon" sizes="120x120" href="/apple-touch-icon-120x120.png">
-  <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png">
-  <link rel="apple-touch-icon" sizes="167x167" href="/apple-touch-icon-167x167.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
   <meta name="apple-mobile-web-app-title" content="Mikołaj">
-  <!-- podstawowe części fontów (łacina + polskie znaki, ~98 KB) — od razu; części -ext tylko na żądanie -->
-  <link rel="preload" href="/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+  <!-- szeryf nagłówków (łacina + polskie znaki) — od razu; części -ext tylko na żądanie; reszta tekstu fontem systemu -->
   <link rel="preload" href="/newsreader.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="/newsreader-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/app.css">
@@ -65,7 +57,7 @@
     <h2 class="label">Jak to działa</h2>
     <div class="points">
     <div class="point"><h3>Każdy pisze list</h3><p>Kilka zdań do Mikołaja i lista życzeń.</p></div>
-    <div class="point"><h3>Bliscy wybierają prezent</h3><p>Kto chce, rezerwuje kupienie komuś prezentu.</p></div>
+    <div class="point"><h3>Bliscy wybierają prezent</h3><p>Kto chce, zaznacza, że kupi dany prezent.</p></div>
     <div class="point"><h3>Niespodzianka zostaje niespodzianką</h3><p>Nie widzisz, co inni kupują — tylko swoje.</p></div>
     <div class="point"><h3>Także za dziadków i dzieci</h3><p>Bez wykluczania — da się wpisać list za kogoś.</p></div>
     </div>
@@ -75,7 +67,7 @@
     <div class="actions mt"><button class="a solid" data-go="register">Załóż rodzinę</button><button class="a line" data-go="login">Mam już konto</button></div>
     </div><div>
     <h2 class="label">Wypróbuj</h2>
-    <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz rezerwować, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
+    <p class="fam-text">Zobacz, jak to wygląda na przykładowej rodzinie — bez konta. Możesz wybierać prezenty, pisać listy i zajrzeć do zakładki organizatora. Nic się nie zapisuje.</p>
     <div class="actions mt"><button class="a line" data-act="demo">Otwórz przykładową rodzinę</button></div>
     </div></div>
   </section></main>

@@ -1,0 +1,33 @@
+# Cała konfiguracja instalacji. Stawiasz własną kopię? Zmień sekcję [vars] i wdróż: npx wrangler deploy
+name = "mikolaj"
+main = "src/worker.js"
+compatibility_date = "2026-11-10"
+
+[vars]
+# Adres aplikacji — trafia do linków w mailach, robots.txt i podglądu linku; inne domeny przenoszą na niego.
+# Pusty: aplikacja działa pod adresem, pod którym ją otwarto (np. *.workers.dev), bez maili z harmonogramu.
+APP_URL = "https://list.do.mikolaja.pl"
+# Nadawca maili (domena zweryfikowana w Resend). Maile działają, gdy jest też sekret RESEND_API_KEY:
+#   npx wrangler secret put RESEND_API_KEY
+MAIL_FROM = "Mikołaj <listdo@mikolaja.pl>"
+# "true": każdy może założyć rodzinę. Cokolwiek innego: tylko pierwsza rodzina, reszta dołącza z zaproszeń.
+OPEN_REGISTRATION = "true"
+
+# public/ podaje Cloudflare; Worker dokłada nagłówki bezpieczeństwa i obsługuje / oraz /api/.
+[assets]
+directory = "public"
+binding = "ASSETS"
+run_worker_first = true
+
+# Jedna baza SQLite na wszystkie rodziny. Nie zmieniaj nazw — to odłączyłoby aplikację od danych.
+[[durable_objects.bindings]]
+name = "FAMILY"
+class_name = "FamilyStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FamilyStore"]
+
+# 3 grudnia 9:00 UTC — przypomnienie przed Wigilią; codziennie 11:00 UTC — nowe życzenia.
+[triggers]
+crons = ["0 9 3 12 *", "0 11 * * *"]

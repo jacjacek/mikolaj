@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Verify a real remote deployment: commit, frontend bytes, CSP and anonymous API."""
+"""Check a live deployment: revision, every public file byte for byte, CSP and the anonymous API.
+
+Usage: python3 scripts/verify_deployment.py --revision <git sha> [--url https://...]
+The address defaults to APP_URL from wrangler.toml.
+"""
 import argparse
 import json
 from pathlib import Path
 import re
 import time
+import tomllib
 import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGETS = {'master': 'https://list.do.mikolaja.pl'}
 AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
 
 
@@ -23,22 +27,6 @@ def fetch(base, path):
         return response.status, response.headers, response.read()
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
-
-
-def fetch_raw(base, path):
-    opener = urllib.request.build_opener(NoRedirect)
-    request = urllib.request.Request(base + path, headers={'User-Agent': AGENT})
-    try:
-        response = opener.open(request, timeout=25)
-    except urllib.error.HTTPError as error:
-        response = error
-    with response:
-        return response.status, response.headers, response.read()
-
-
 def worker_csp():
     worker = (ROOT / 'src/worker.js').read_text(encoding='utf-8')
     policies = re.findall(r"'Content-Security-Policy': \"([^\"]*)\"", worker)
@@ -46,17 +34,14 @@ def worker_csp():
     return policies[0]
 
 
-def verify(base, revision, branch):
-    if branch == 'master' and 'mikolaja.pl' in base:
-        # Stary adres musi przekierowywać na nowy.
-        status, headers, _ = fetch_raw('https://mikolaj.walasek.xyz', '/moje?x=1')
-        assert status == 301 and headers.get('Location') == base + '/moje?x=1', 'Old domain does not redirect'
+def verify(base, revision):
     status, headers, body = fetch(base, '/version.json')
-    assert status == 200 and json.loads(body) == {'revision': revision, 'branch': branch}, 'Revision has not propagated yet'
+    assert status == 200 and json.loads(body) == {'revision': revision}, 'Revision has not propagated yet'
     assert 'no-store' in headers.get('Cache-Control', ''), 'Revision endpoint must not be cached'
     for name in sorted(p.name for p in (ROOT / 'public').iterdir() if p.is_file() and p.name != 'index.html'):
-        status, _, body = fetch(base, '/' + name)
+        status, headers, body = fetch(base, '/' + name)
         assert status == 200 and body == (ROOT / 'public' / name).read_bytes(), 'Source mismatch: ' + name
+        assert headers.get('X-Content-Type-Options') == 'nosniff', 'Missing security headers: ' + name
     status, headers, body = fetch(base, '/')
     assert status == 200, 'Application HTML did not return 200'
     csp = headers.get('Content-Security-Policy', '')
@@ -66,15 +51,14 @@ def verify(base, revision, branch):
     assert csp.replace(f" 'nonce-{nonce[1]}'", '', 2) == worker_csp(), 'CSP was weakened or changed'
     source = (ROOT / 'public/index.html').read_text(encoding='utf-8')
     css = (ROOT / 'public/app.css').read_text(encoding='utf-8')
-    tagged = source.replace('<script', f'<script nonce="{nonce[1]}"').replace('<link rel="stylesheet" href="/app.css">', f'<style nonce="{nonce[1]}">{css}</style>')
+    tagged = (source.replace('{{ORIGIN}}', base).replace('<script', f'<script nonce="{nonce[1]}"')
+              .replace('<link rel="stylesheet" href="/app.css">', f'<style nonce="{nonce[1]}">{css}</style>'))
     # Cloudflare may inject its own nonce'd scripts; everything from the source must be present unchanged.
     html = body.decode('utf-8')
     assert all(line.strip() in html for line in tagged.splitlines()), 'Source mismatch: index.html'
     for path, expected in [('/api/health', 200), ('/api/state', 200), ('/api/admin', 401)]:
         status, _, body = fetch(base, path)
         assert status == expected, 'Unexpected anonymous API status: ' + path
-        if path == '/api/health':
-            assert json.loads(body).get('storage') == 'sqlite', 'Unhealthy SQLite backend'
         if path == '/api/state':
             assert json.loads(body).get('user') is None, 'Anonymous request is unexpectedly authenticated'
 
@@ -82,15 +66,13 @@ def verify(base, revision, branch):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--revision', required=True)
-    parser.add_argument('--branch', choices=TARGETS, required=True)
+    parser.add_argument('--url')
     args = parser.parse_args()
-    if not re.fullmatch(r'[0-9a-f]{40}', args.revision):
-        parser.error('Revision must be an exact lowercase Git commit SHA')
-    base = TARGETS[args.branch]
+    base = (args.url or tomllib.loads((ROOT / 'wrangler.toml').read_text(encoding='utf-8'))['vars']['APP_URL']).rstrip('/')
     for attempt in range(1, 13):
         try:
-            verify(base, args.revision, args.branch)
-            print(json.dumps({'verified': True, 'url': base, 'revision': args.revision, 'branch': args.branch, 'attempt': attempt}), flush=True)
+            verify(base, args.revision)
+            print(json.dumps({'verified': True, 'url': base, 'revision': args.revision, 'attempt': attempt}), flush=True)
             return
         except (AssertionError, urllib.error.URLError, TimeoutError, ValueError) as error:
             if attempt == 12:

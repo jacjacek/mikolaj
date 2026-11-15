@@ -21,11 +21,13 @@ const range = w => `<span class="st rng">${tier(w.tier).range}</span>`;
 
 /* ===================== STAN ===================== */
 const S = {
-  data: null, admin: null, token: null,
+  data: null, admin: null, token: null, info: null,
+  fresh: null,                // stan, który przyszedł w odpowiedzi na zapis
+  demo: false,
   screen: 'lists',            // lists | mine | family | login | join | link
   open: new Set(),            // rozwinięte sekcje
   filter: {}, editWish: null, adding: null, editLetter: null, addingPerson: false,
-  menu: false, fam: null, famView: 'for', confirm: null, info: null,
+  menu: false, fam: null, famView: 'for', confirm: null, assign: null, editOwner: null,
 };
 let theme = 'auto';
 const isDark = () => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -48,7 +50,7 @@ const secKey = (kind, owner) => owner === me().id ? `s:${kind}` : `s:${kind}:${o
 
 /* ===================== API ===================== */
 async function api(path, method = 'GET', body) {
-  if (S.demo) return demoApi(path, method, body || {});
+  if (S.demo) return demoApi(path, method, body);
   const init = { method, credentials: 'same-origin', headers: {} };
   if (method !== 'GET' && method !== 'DELETE') { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body || {}); }
   let res, data = {};
@@ -58,19 +60,25 @@ async function api(path, method = 'GET', body) {
     if (res.status === 401 && S.data?.user) { S.data = null; go('login'); }
     throw new Error(data.error || 'Coś poszło nie tak. Spróbuj ponownie.');
   }
+  if (data.state) S.fresh = data.state;
   return data;
 }
 async function refresh() {
-  S.data = await api('state');
-  S.admin = S.screen === 'family' && S.data.user?.isAdmin ? await api('admin') : null;
+  // po zapisie stan już jest (przyszedł w odpowiedzi); zakładka Rodzina dociąga swój przegląd równolegle
+  const admin = S.screen === 'family' && (S.fresh || S.data)?.user?.isAdmin;
+  [S.data, S.admin] = await Promise.all([S.fresh || api('state'), admin ? api('admin') : null]);
+  S.fresh = null;
 }
-let busy = false;
+// Jedna akcja naraz; kliknięty przycisk przygasa, dopóki serwer nie odpowie.
+let busy = false, pressed = null;
 async function act(fn, msg, undo) {
   if (busy) return;
   busy = true;
+  const el = pressed;
+  el?.classList.add('wait');
   try { await fn(); await refresh(); render(); if (msg) toast(msg, undo); }
-  catch (e) { toast(e.message); }
-  finally { busy = false; }
+  catch (e) { S.fresh = null; toast(e.message, null, true); }
+  finally { busy = false; el?.classList.remove('wait'); }
 }
 async function copy(url, msg) {
   try { await navigator.clipboard.writeText(url); toast(msg); }
@@ -78,129 +86,23 @@ async function copy(url, msg) {
 }
 
 /* ===================== DEMO =====================
-   Przykładowa rodzina w pamięci przeglądarki — ten sam kształt danych co /api, bez serwera.
-   Zasady jak w backendzie: obdarowany nie widzi rezerwacji na swojej liście. */
-let demo;
-function demoSeed() {
-  const m = (id, name, letter, extra = {}) => ({ id, name, letter, email: id + '@przyklad.pl', canAdd: false, isAdmin: false, managedBy: null, ...extra });
-  const w = (id, ownerId, title, note, url, tier) => ({ id, ownerId, title, note, url, tier });
-  return {
-    me: 'ania', n: 0, invite: 'demo'.padEnd(64, '0'),
-    members: [
-      m('ania', 'Ania', 'w tym roku dużo czytam i uczę się piec chleb na zakwasie. Najbardziej ucieszy mnie coś, co przyda się w kuchni. Noszę rozmiar M. Proszę — żadnych świeczek zapachowych!', { isAdmin: true, canAdd: true }),
-      m('bartek', 'Bartek', 'piszę krótko, bo wolę rower niż pisanie listów. Jeżdżę do pracy cały rok, więc przyda mi się wszystko, co pomaga zimą. Kubków mam już naprawdę dość.'),
-      m('marta', 'Marta', 'chciałabym w nowym roku znaleźć więcej czasu na rysowanie. Lubię ciepłe kolory i rzeczy robione ręcznie.', { canAdd: true }),
-      m('tomek', 'Tomek', 'byłem w tym roku grzeczny (prawie zawsze). Lubię klocki, kosmos i dinozaury. Nie lubię swetrów, które drapią.', { managedBy: 'ania', email: null }),
-      m('jurek', 'Dziadek Jurek', 'najlepiej czuję się na działce i przy radiu. Przydadzą mi się ciepłe kapcie, rozmiar 43.', { managedBy: 'marta', email: null }),
-    ],
-    wishes: [
-      w('w1', 'ania', 'Książka o pieczeniu chleba', 'Dla początkujących, z przepisami na zakwas.', 'https://www.empik.com/', 'ok'),
-      w('w2', 'ania', 'Ciepłe skarpety wełniane', 'Rozmiar 38–40, byle nie różowe.', '', 'small'),
-      w('w3', 'ania', 'Bilety do teatru', 'Dowolny spektakl — chętnie we dwoje.', '', 'good'),
-      w('w4', 'bartek', 'Tylna lampka rowerowa', 'Ładowana przez USB.', 'https://www.decathlon.pl/', 'ok'),
-      w('w5', 'bartek', 'Zimowe rękawiczki rowerowe', 'Rozmiar L, z palcami do ekranu.', '', 'ok'),
-      w('w6', 'bartek', 'Gra planszowa dla dwóch osób', 'Coś do 30 minut.', '', 'ok'),
-      w('w7', 'bartek', 'Kalendarz ścienny ze zdjęciami gór', '', '', 'small'),
-      w('w8', 'bartek', 'Rower szosowy', 'Rama 56 cm. Wiem, że to dużo — można się złożyć.', '', 'angel'),
-      w('w9', 'marta', 'Zestaw akwareli w kostkach', '24 kolory, w metalowym pudełku.', 'https://www.empik.com/', 'ok'),
-      w('w10', 'marta', 'Szkicownik A5 z grubym papierem', 'Papier co najmniej 200 g/m².', '', 'small'),
-      w('w11', 'marta', 'Weekendowe warsztaty ceramiki', 'Termin dowolny.', '', 'good'),
-      w('w12', 'tomek', 'Klocki — stacja kosmiczna', 'Dla 8+, najlepiej z astronautami.', 'https://allegro.pl/', 'good'),
-      w('w13', 'tomek', 'Latarka czołowa', 'Do czytania pod kołdrą.', '', 'small'),
-      w('w14', 'tomek', 'Książka o dinozaurach', 'Z dużymi ilustracjami.', '', 'ok'),
-      w('w15', 'jurek', 'Kapcie z owczej wełny', 'Rozmiar 43, zakryta pięta.', '', 'ok'),
-      w('w16', 'jurek', 'Radio z dużymi pokrętłami', 'Na prąd z gniazdka, nie na baterie.', '', 'ok'),
-    ],
-    res: [
-      { wishId: 'w4', by: 'ania', purchased: true, was: 'ok' },
-      { wishId: 'w12', by: 'ania', purchased: false, was: 'ok' },
-      { wishId: 'w16', by: 'ania', purchased: false, was: 'ok' },
-      { wishId: 'w5', by: 'marta', purchased: false, was: 'ok' },
-      { wishId: 'w10', by: 'bartek', purchased: true, was: 'small' },
-      { wishId: 'w1', by: 'bartek', purchased: true, was: 'ok' },
-      { wishId: 'w14', by: 'marta', purchased: false, was: 'ok' },
-      { wishId: 'w15', by: 'bartek', purchased: false, was: 'ok' },
-    ],
-  };
-}
-function demoApi(path, method, body) {
-  const D = demo, me = D.members.find(m => m.id === D.me);
-  const fail = msg => { throw new Error(msg); };
-  const res = id => D.res.find(r => r.wishId === id);
-  const mem = id => D.members.find(m => m.id === id) || fail('Nie znaleziono tej osoby.');
-  const canEdit = m => m.id === me.id || m.managedBy === me.id || D.until > Date.now() / 1000;
-  const out = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
-  const [a, id, sub] = path.split('/');
-  if (path === 'state') return out({
-    family: { name: D.familyName || 'Nowakowie' },
-    user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0 },
-    members: D.members.map(({ id, name, letter, managedBy }) => ({ id, name, letter, managedBy })),
-    wishes: D.wishes.map(w => {
-      const r = res(w.id);
-      if (w.ownerId === me.id || !r) return w;
-      return { ...w, taken: r.by === me.id ? 'me' : 'other', purchased: r.purchased, ...(D.until > Date.now() / 1000 ? { buyerId: r.by } : {}), ...(r.by === me.id && r.was !== w.tier ? { prevTier: r.was } : {}) };
-    }),
-  });
-  if (path === 'admin') return out({
-    invite: `${location.origin}/#invite=${D.invite}`,
-    members: D.members,
-    locked: !(D.until > Date.now() / 1000),
-    reservations: !(D.until > Date.now() / 1000) ? [] : D.res.map(r => { const w = D.wishes.find(x => x.id === r.wishId); return { wishId: w.id, title: w.title, tier: w.tier, ownerId: w.ownerId, buyerId: r.by, purchased: r.purchased }; }).filter(r => r.ownerId !== me.id),
-  });
-  if (path === 'session') { D.until = body.adminMode ? Math.floor(Date.now() / 1000) + 3600 : 0; return out({ ok: true }); }
-  if (path === 'family') { D.familyName = body.name; return out({ ok: true }); }
-  if (path === 'logout' || path === 'invite') return out({ ok: true });
-  if (a === 'wishes') {
-    if (!id) {
-      const owner = mem(body.ownerId || me.id);
-      if (!canEdit(owner)) fail('Brak uprawnień.');
-      const nid = 'd' + ++D.n;
-      D.wishes.push({ id: nid, ownerId: owner.id, title: body.title, note: body.note, url: body.url, tier: body.tier });
-      return out({ id: nid });
-    }
-    const w = D.wishes.find(x => x.id === id) || fail('To życzenie nie jest już dostępne.');
-    const r = res(id);
-    if (sub === 'reserve') {
-      if (method === 'POST') { const by = body.buyerId || me.id; if (r && !body.buyerId) fail('Ktoś już wybrał ten prezent.'); if (r) r.by = by; else D.res.push({ wishId: id, by, purchased: false, was: w.tier }); }
-      if (method === 'DELETE') D.res = D.res.filter(x => x !== r);
-      if (method === 'PATCH') r.purchased = body.purchased;
-    } else {
-      if (method === 'PATCH') Object.assign(w, { title: body.title, note: body.note, url: body.url, tier: body.tier });
-      if (method === 'DELETE') { D.wishes = D.wishes.filter(x => x !== w); D.res = D.res.filter(x => x !== r); }
-    }
-    return out({ ok: true });
-  }
-  if (a === 'members') {
-    if (!id) { const nid = 'd' + ++D.n; D.members.push({ id: nid, name: body.name, letter: '', email: null, canAdd: false, isAdmin: false, managedBy: me.id }); return out({ id: nid }); }
-    const m = mem(id);
-    if (sub === 'letter') { if (!canEdit(m)) fail('Brak uprawnień.'); m.letter = body.letter; return out({ ok: true }); }
-    if (sub === 'link') return out({ url: `${location.origin}/#link=${'demo'.padEnd(64, '0')}` });
-    if (method === 'PATCH') {
-      if (body.canAdd !== undefined) m.canAdd = body.canAdd;
-      if (body.managedBy) m.managedBy = body.managedBy;
-      if (body.admin) { D.members.forEach(x => { x.isAdmin = false; }); m.isAdmin = true; }
-    }
-    if (method === 'DELETE') {
-      const own = D.wishes.filter(w => w.ownerId === id).map(w => w.id);
-      D.res = D.res.filter(r => r.by !== id && !own.includes(r.wishId));
-      D.wishes = D.wishes.filter(w => w.ownerId !== id);
-      D.members.forEach(x => { if (x.managedBy === id) x.managedBy = me.id; });
-      D.members = D.members.filter(x => x !== m);
-    }
-    return out({ ok: true });
-  }
-  fail('W trybie demo to nie działa.');
-}
-function startDemo() {
-  demo = demoSeed(); S.demo = true; S.open.clear();
+   Przykładowa rodzina żyje w demo.js — pobierana dopiero po kliknięciu „Zobacz przykład”. */
+let demoApi = null;
+async function startDemo() {
+  try { demoApi = (await import('./demo.js')).createDemo(); } catch { return toast('Brak połączenia. Spróbuj ponownie.', null, true); }
+  S.demo = true; S.open.clear();
   act(async () => { S.screen = 'lists'; history.replaceState(null, '', '#/'); window.scrollTo(0, 0); }, 'Przykładowa rodzina — patrzysz jako Ania');
 }
 function endDemo() {
-  S.demo = false; demo = null; S.data = { user: null }; S.admin = null; S.open.clear();
+  S.demo = false; demoApi = null; S.data = { user: null }; S.admin = null; S.open.clear();
   go('landing');
 }
 
 /* ===================== WIDOKI ===================== */
+// Pole z widoczną etykietą — podpowiedź w środku pola znika przy pisaniu, etykieta zostaje.
+const field = (label, control) => `<label class="field"><span>${label}</span>${control}</label>`;
+const passField = (label, auto, min = true) => field(label, `<input class="in" name="password" type="password" ${min ? 'minlength="4"' : ''} required autocomplete="${auto}">`)
+  + '<button type="button" class="a quiet" data-act="show-pass">Pokaż hasło</button>';
 function fold(key, cls, head, body) {
   const open = S.open.has(key);
   return `<div class="fold ${cls} ${open ? 'open' : ''}" data-fold="${key}">
@@ -225,30 +127,34 @@ function vHead() {
       ? `<button aria-current="true">${esc(f.name)}${f.isAdmin ? '<small>organizator</small>' : ''}</button>`
       : `<button data-act="switch" data-id="${f.memberId}">${esc(f.name)}${f.isAdmin ? '<small>organizator</small>' : ''}</button>`).join('')}</div>` : ''}
     ${me().isAdmin ? `<button data-act="admin-mode">${god() ? 'Wyłącz tryb organizatora' : 'Tryb organizatora'}</button>` : ''}
-    ${S.demo ? '' : '<button data-go="newfam">Nowa rodzina</button>'}
+    ${S.demo || !S.data.register ? '' : '<button data-go="newfam">Nowa rodzina</button>'}
+    ${S.data.mail ? `<button data-act="mails">${me().mails ? 'Wyłącz przypomnienia mailem' : 'Włącz przypomnienia mailem'}</button>` : ''}
     ${fams.length > 1 ? '<button data-act="leave">Opuść rodzinę</button>' : ''}
     <button data-act="logout">Wyloguj</button>
-    ${S.confirm?.act === 'leave' ? confirmBox('leave', '', `Opuścić rodzinę ${esc(S.data.family?.name)}? Znikną Twój list, życzenia i rezerwacje w tej rodzinie${managedBy(me().id).length ? ', a osoby, które prowadzisz, przejdą do organizatora' : ''}. Wrócić możesz tylko z nowym zaproszeniem.`, 'Opuść') : ''}
+    ${S.confirm?.act === 'leave' ? confirmBox('leave', '', `Opuścić rodzinę ${esc(S.data.family?.name)}? Znikną Twój list i życzenia w tej rodzinie, a prezenty, które kupujesz, znów będą wolne${managedBy(me().id).length ? ', a osoby, które prowadzisz, przejdą do organizatora' : ''}. Wrócić możesz tylko z nowym zaproszeniem.`, 'Opuść') : ''}
   </div></div></div>`;
 }
 
+// życzenie zmieniło się, odkąd je kupuję — żeby nie kupić czegoś innego, niż było na liście
+const changed = w => (w.prevTitle ? `<span class="changed">Życzenie zmieniło się, odkąd je kupujesz — wcześniej: ${esc(w.prevTitle)}.</span>` : '')
+  + (w.prevTier ? `<span class="changed">Budżet zmienił się, odkąd to kupujesz — wcześniej ${tier(w.prevTier).range}.</span>` : '');
 function vGift(w) {
   const st = status(w);
   let row;
   if (st === 'free') row = `<button class="a solid" data-act="reserve" data-id="${w.id}">Kupię to</button>`;
   else if (st === 'mine') row = `<span class="st">${w.purchased ? 'Kupione przez Ciebie' : 'Ty to kupujesz'}</span>
-    <button class="a quiet" data-act="${w.purchased ? 'buy' : 'cancel'}" data-id="${w.id}">${w.purchased ? 'cofnij' : 'rezygnuję'}</button>`;
+    <button class="a quiet" data-act="${w.purchased ? 'buy' : 'cancel'}" data-id="${w.id}">${w.purchased ? 'Cofnij zakup' : 'Rezygnuję'}</button>`;
   else row = `<span class="st">${w.buyerId ? `${w.purchased ? 'Kupione' : 'Kupuje'}: ${esc(member(w.buyerId)?.name)}` : w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
   let assign = '';
   if (god() && S.assign === w.id) assign = `<div class="row">
       <label class="sr" for="f-buyer">Kto kupuje</label>
       <select class="in" id="f-buyer"><option value="">Nikt — prezent wolny</option>${accountsBut(w.ownerId).map(a => `<option value="${a.id}" ${a.id === (w.buyerId || (w.taken === 'me' ? me().id : '')) ? 'selected' : ''}>Kupuje: ${esc(a.name)}</option>`).join('')}</select>
       <button class="a solid" data-act="assign-save" data-id="${w.id}">Zapisz</button><button class="a quiet" data-act="assign" data-id="">Anuluj</button></div>`;
-  else if (god()) row += `<button class="a quiet" data-act="assign" data-id="${w.id}">przypisz</button>`;
+  else if (god()) row += `<button class="a quiet" data-act="assign" data-id="${w.id}">Przypisz</button>`;
   return `<div class="gift ${st === 'free' ? '' : 'taken'}">
     <span class="t">${esc(w.title)}</span>
     ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
-    ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
+    ${changed(w)}
     <div class="row"><span class="act">${row}</span><span class="meta">${range(w)}${w.url ? `<a class="a quiet lnk" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</span></div>
     ${assign}
   </div>`;
@@ -284,7 +190,7 @@ function vLists() {
           ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
         ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
         ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień list i życzenia</button></div>` : ''}
-        <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">zwiń</button></p>`;
+        <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">Zwiń</button></p>`;
       return fold('p:' + p.id, 'person', head, body);
     }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
       ${me().isAdmin ? '<div class="actions mt"><button class="a solid" data-go="family">Zaproś bliskich</button></div>' : ''}`}
@@ -294,19 +200,19 @@ function vLists() {
 
 function wishForm(w, isNew) {
   return `<div class="form">
-    <input class="in" id="f-title" value="${esc(w.title)}" placeholder="Co chcesz dostać?" maxlength="160">
-    <textarea class="in" id="f-note" placeholder="Wskazówki — rozmiar, kolor, marka" maxlength="1500">${esc(w.note)}</textarea>
-    <select class="in" id="f-tier" aria-label="Budżet" required>
-      <option value="" disabled ${w.tier ? '' : 'selected'}>Ile może kosztować?</option>
-      ${TIERS.map(t => `<option value="${t.id}" ${w.tier === t.id ? 'selected' : ''}>${t.name} — ${t.range}</option>`).join('')}
-    </select>
-    <input class="in" id="f-url" value="${esc(w.url)}" placeholder="Link (opcjonalnie)" maxlength="2000" inputmode="url">
+    ${field('Co chcesz dostać?', `<input class="in" id="f-title" value="${esc(w.title)}" maxlength="160">`)}
+    ${field('Wskazówki — rozmiar, kolor, marka', `<textarea class="in" id="f-note" maxlength="1500">${esc(w.note)}</textarea>`)}
+    ${field('Ile może kosztować?', `<select class="in" id="f-tier" required>
+      <option value="" disabled ${w.tier ? '' : 'selected'}>Wybierz</option>
+      ${TIERS.map(t => `<option value="${t.id}" ${w.tier === t.id ? 'selected' : ''}>${t.range} — ${t.name}</option>`).join('')}
+    </select>`)}
+    ${field('Link do sklepu — jeśli masz', `<input class="in" id="f-url" value="${esc(w.url)}" placeholder="https://" maxlength="2000" inputmode="url">`)}
     <div class="actions">
       <button class="a solid" data-act="save-wish" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">${isNew ? 'Dodaj' : 'Zapisz'}</button>
       <button class="a quiet" data-act="close-edit">Anuluj</button>
       ${isNew ? '' : `<button class="a quiet push" data-act="delete-wish" data-id="${w.id}">Usuń</button>`}
     </div>
-    ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Usunąć to życzenie? Jeśli ktoś je już kupuje, rezerwacja też zniknie.', 'Usuń') : ''}
+    ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Usunąć to życzenie? Jeśli ktoś już to kupuje, zniknie też z jego zakładki Kupuję.', 'Usuń') : ''}
   </div>`;
 }
 const confirmBox = (act, id, q, yes) => `<div class="confirm"><p>${q}</p><div class="actions">
@@ -336,9 +242,9 @@ function ownerBlocks(ownerId) {
     </div>`)}
     ${S.adding === ownerId ? wishForm({ title: '', note: '', url: '', tier: '', ownerId }, true)
       : `<div class="actions mt"><button class="a solid" data-act="add" data-owner="${ownerId}">${ws.length ? 'Dodaj życzenie' : 'Dodaj pierwsze życzenie'}</button></div>`}`;
-  const label = ['List', 'Życzenia'];  // czyja to lista, mówi przyklejone imię nad sekcjami
-  return fold(secKey('letter', ownerId), 'sec', `<h2>${label[0]}</h2>`, letterBody)
-       + fold(secKey('wishes', ownerId), 'sec', `<h2>${label[1]}${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody);
+  // czyja to lista, mówi przyklejone imię nad sekcjami
+  return fold(secKey('letter', ownerId), 'sec', '<h2>List</h2>', letterBody)
+       + fold(secKey('wishes', ownerId), 'sec', `<h2>Życzenia${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody);
 }
 
 // Kupuję — osobna zakładka: co wybrałem dla innych, pogrupowane według obdarowanych
@@ -348,10 +254,10 @@ function vBuying() {
   const item = w => `<div class="gift ${w.purchased ? 'done' : ''}">
       <span class="t">${esc(w.title)}</span>
       ${w.note ? `<span class="n">${esc(w.note)}</span>` : ''}
-      ${w.prevTier ? `<span class="changed">Budżet zmienił się od Twojej rezerwacji — wcześniej ${tier(w.prevTier).range}.</span>` : ''}
+      ${changed(w)}
       <div class="row"><span class="act">
-        <button class="a ${w.purchased ? 'quiet' : 'line'}" data-act="buy" data-id="${w.id}">${w.purchased ? 'cofnij zakup' : 'Oznacz jako kupione'}</button>
-        <button class="a quiet" data-act="cancel" data-id="${w.id}">rezygnuję</button></span>
+        <button class="a ${w.purchased ? 'quiet' : 'line'}" data-act="buy" data-id="${w.id}">${w.purchased ? 'Cofnij zakup' : 'Oznacz jako kupione'}</button>
+        <button class="a quiet" data-act="cancel" data-id="${w.id}">Rezygnuję</button></span>
         <span class="meta">${range(w)}${w.url ? `<a class="a quiet lnk" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</span>
       </div>
     </div>`;
@@ -384,7 +290,7 @@ function vMine() {
       </div>
       <div class="managed-body">${ownerBlocks(m.id)}</div>
     </div>`;
-  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych rezerwujesz na swoim koncie.', `
+  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych kupujesz ze swojego konta.', `
         <div class="actions managed-actions">
           <button class="a quiet" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
           <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
@@ -393,7 +299,7 @@ function vMine() {
 
   const addPerson = !me().canAdd ? '' : S.addingPerson
     ? `<div class="add-person"><div class="form">
-        <input class="in" id="f-person" placeholder="Imię, np. Zosia albo Babcia Hela" maxlength="60">
+        ${field('Imię, np. Zosia albo Babcia Hela', '<input class="in" id="f-person" maxlength="60">')}
         <div class="actions"><button class="a solid" data-act="save-person">Dodaj osobę</button><button class="a quiet" data-act="cancel-person">Anuluj</button></div>
       </div></div>`
     : `<div class="add-person">
@@ -421,7 +327,6 @@ function vFamily() {
   if (S.famView === 'buyer') {
     resHtml = accounts.map(b => {
       const rs = A.reservations.filter(r => r.buyerId === b.id);
-
       const you = b.id === me().id ? ' <span class="you">(Ty)</span>' : '';
       if (!rs.length) return `<div class="res-group"><h3>${esc(b.name)}${you}</h3><p class="empty">Nic jeszcze nie kupuje.</p></div>`;
       return `<div class="res-group"><h3>${esc(b.name)}${you}<span>${rs.filter(r => r.purchased).length} z ${rs.length} kupione</span></h3>
@@ -432,7 +337,7 @@ function vFamily() {
     resHtml = A.members.filter(m => m.id !== me().id).map(m => {
       const total = wishesOf(m.id).length;
       const rs = A.reservations.filter(r => r.ownerId === m.id);
-      return `<div class="res-group"><h3>${esc(m.name)}<span>${rs.length} z ${total} zajęte</span></h3>
+      return `<div class="res-group"><h3>${esc(m.name)}<span>${rs.length} z ${total} ktoś kupuje</span></h3>
         ${rs.length ? rs.map(r => resRow(r, `kupuje ${name(r.buyerId)}`)).join('') : '<p class="empty">Nikt jeszcze nic nie wybrał.</p>'}</div>`;
     }).join('') + `<p class="priv mt">Twojej listy tu nie ma — żeby nie zepsuć Ci niespodzianki.</p>`;
   }
@@ -447,18 +352,16 @@ function vFamily() {
     const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
-
         <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>`}
       </div>
       ${confirming('make-admin', m.id) ? confirmBox('make-admin', m.id, `${esc(m.name)} zostanie organizatorem. Ty stracisz dostęp do tej zakładki.`, 'Przekaż') : ''}
-      ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `${esc(m.name)} straci dostęp. Znikną list, życzenia i rezerwacje tej osoby.${A.members.some(x => x.managedBy === m.id) ? ' Osoby, które prowadzi, przejdą do Ciebie.' : ''}`, 'Usuń') : ''}`;
+      ${confirming('remove-member', m.id) ? confirmBox('remove-member', m.id, `${esc(m.name)} straci dostęp. Znikną list i życzenia tej osoby, a prezenty, które kupuje, znów będą wolne.${A.members.some(x => x.managedBy === m.id) ? ' Osoby, które prowadzi, przejdą do Ciebie.' : ''}`, 'Usuń') : ''}`;
     if (open && m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
-        <label class="sr" for="f-manager">Opiekun</label>
-        <select class="in" id="f-manager">${accounts.map(a => `<option value="${a.id}" ${a.id === m.managedBy ? 'selected' : ''}>Prowadzi: ${esc(a.name)}</option>`).join('')}</select>
-        <button class="a" data-act="save-manager" data-id="${m.id}">Zmień opiekuna</button>
+        ${field('Kto prowadzi tę listę', `<select class="in" id="f-manager">${accounts.map(a => `<option value="${a.id}" ${a.id === m.managedBy ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>`)}
+        <button class="a" data-act="save-manager" data-id="${m.id}">Zapisz, kto prowadzi</button>
         <button class="a" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>
       </div>
@@ -487,15 +390,15 @@ function vFamily() {
       <button class="a quiet" data-act="new-invite">Utwórz nowy link</button>
     </div>
     ${S.confirm?.act === 'new-invite' ? confirmBox('new-invite', '', 'Stary link przestanie działać. Osoby, które już dołączyły, zostają.', 'Utwórz nowy') : ''}
-    ${S.data.mail ? `<form class="form mt" data-form="invite-mail"><label class="sr" for="f-invite-mail">E-mail</label>
-      <input class="in" id="f-invite-mail" name="email" type="email" placeholder="albo wyślij mailem — wpisz adres" required>
+    ${S.data.mail ? `<form class="form mt" data-form="invite-mail">
+      ${field('Albo wyślij zaproszenie mailem — wpisz adres', '<input class="in" name="email" type="email" required>')}
       <div class="actions"><button class="a line">Wyślij zaproszenie</button></div></form>` : ''}`;
   const rename = `<h2 class="label">Nazwa rodziny</h2>
     <form class="form" data-form="rename"><label class="sr" for="f-family-name">Nazwa rodziny</label>
       <input class="in" id="f-family-name" name="name" value="${esc(S.data.family?.name)}" maxlength="80" required>
       <div class="actions"><button class="a line">Zmień nazwę</button></div></form>`;
   const addPeople = `<h2 class="label">Dodaj osoby</h2>
-    <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz przekazać komuś jego listę — dostanie link, ustawi e-mail i hasło i będzie ją prowadzić sam — albo zmienić opiekuna.</p>
+    <p class="fam-text">Wpisz imiona, każde w osobnej linii. Te osoby nie mają konta — prowadzisz je Ty. Potem możesz przekazać komuś jego listę — dostanie link, ustawi e-mail i hasło i będzie ją prowadzić sam — albo wskazać, kto inny ją prowadzi.</p>
     <div class="form"><label class="sr" for="f-people">Imiona</label>
       <textarea class="in" id="f-people" placeholder="${'Babcia Hela&#10;Dziadek Jurek&#10;Zosia'}"></textarea>
       <div class="actions"><button class="a solid" data-act="add-people">Dodaj osoby</button></div></div>`;
@@ -523,9 +426,8 @@ function vNewFamily() {
       ? `${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodziny ${esc(I.familyName)}. Dołączysz tym samym kontem — w każdej rodzinie masz osobny list i życzenia, a między rodzinami przełączasz się pod swoim imieniem.`
       : 'Zostajesz jej organizatorem. Obecne rodziny zostają — przełączasz się między nimi pod swoim imieniem.'}</p>
     <form class="form" data-form="${S.screen}">
-      ${join ? '' : '<input class="in" name="familyName" placeholder="Nazwa rodziny, np. Kowalscy" maxlength="80" required>'}
-      <label class="sr" for="f-fam-name">Imię w tej rodzinie</label>
-      <input class="in" id="f-fam-name" name="name" value="${esc(me().name)}" placeholder="Twoje imię w tej rodzinie" maxlength="60" required autocomplete="given-name">
+      ${join ? '' : field('Nazwa rodziny, np. Kowalscy', '<input class="in" name="familyName" maxlength="80" required>')}
+      ${field('Twoje imię w tej rodzinie', `<input class="in" name="name" value="${esc(me().name)}" maxlength="60" required autocomplete="given-name">`)}
       <div class="actions"><button class="a solid">${join ? 'Dołączam' : 'Załóż rodzinę'}</button><button type="button" class="a quiet" data-act="cancel-fam">Anuluj</button></div>
     </form>
   </section>`;
@@ -547,14 +449,15 @@ const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — st
 const PUB = () => `<div class="topbar"><header class="head pub">${MARK}${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
-  const account = `<input class="in" name="name" placeholder="Twoje imię" maxlength="60" required autocomplete="given-name">
-      <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">`;
+  const mail = (label = 'E-mail') => field(label, '<input class="in" name="email" type="email" required autocomplete="email">');
+  const account = `${field('Twoje imię', '<input class="in" name="name" maxlength="60" required autocomplete="given-name">')}
+      ${mail('E-mail — posłuży do logowania')}
+      ${passField('Hasło — co najmniej 4 znaki', 'new-password')}`;
   if (S.screen === 'register') return `${PUB()}<section class="auth fade">
     <h1 class="title">Załóż rodzinę</h1>
     <p class="sub">Zostajesz organizatorem: zapraszasz bliskich linkiem i możesz dodać osoby bez telefonu.</p>
     <form class="form" data-form="register">
-      <input class="in" name="familyName" placeholder="Nazwa rodziny, np. Kowalscy" maxlength="80" required>
+      ${field('Nazwa rodziny, np. Kowalscy', '<input class="in" name="familyName" maxlength="80" required>')}
       ${account}
       <div class="actions"><button class="a solid">Załóż rodzinę</button></div>
     </form>
@@ -564,9 +467,7 @@ function vAuth() {
     <h1 class="title">Zaproszenie</h1>
     <p class="sub">${I.from ? esc(I.from) + ' zaprasza' : 'Zapraszamy'} Cię do rodziny ${esc(I.familyName)} — do wspólnych list do Mikołaja.</p>
     <form class="form" data-form="join">
-      <input class="in" name="name" placeholder="Imię" maxlength="60" required autocomplete="given-name">
-      <input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
+      ${account}
       <div class="actions"><button class="a solid">Dołączam</button></div>
     </form>
     <p class="foot">Masz już konto w innej rodzinie? Wpisz ten sam e-mail i hasło — dołączysz tym samym kontem.</p>
@@ -575,8 +476,8 @@ function vAuth() {
     <h1 class="title">Cześć, ${esc(I.name)}</h1>
     <p class="sub">${I.needsEmail ? 'Ustaw e-mail i hasło — od teraz sam(a) prowadzisz swoją listę.' : 'Ustaw nowe hasło.'}</p>
     <form class="form" data-form="link">
-      ${I.needsEmail ? '<input class="in" name="email" type="email" placeholder="E-mail — posłuży do logowania" required autocomplete="email">' : ''}
-      <input class="in" name="password" type="password" placeholder="Nowe hasło, min. 4 znaki" minlength="4" required autocomplete="new-password">
+      ${I.needsEmail ? mail('E-mail — posłuży do logowania') : ''}
+      ${passField('Nowe hasło — co najmniej 4 znaki', 'new-password')}
       <div class="actions"><button class="a solid">Zapisz</button></div>
     </form>
     ${I.needsEmail ? '<p class="foot">Masz już konto w innej rodzinie? Wpisz ten sam e-mail i hasło — lista dołączy do Twojego konta.</p>' : ''}
@@ -585,7 +486,7 @@ function vAuth() {
     <h1 class="title">Nowe hasło</h1>
     <p class="sub">Podaj e-mail swojego konta — wyślemy link do ustawienia nowego hasła.</p>
     <form class="form" data-form="forgot">
-      <input class="in" name="email" type="email" placeholder="E-mail" required autocomplete="email">
+      ${mail()}
       <div class="actions"><button class="a solid">Wyślij link</button><button type="button" class="a quiet" data-go="login">Wróć do logowania</button></div>
     </form>
   </section>`;
@@ -594,11 +495,11 @@ function vAuth() {
     <h1 class="title">Zaloguj się</h1>
     <p class="sub">Do rodzinnych list do Mikołaja.</p>
     <form class="form" data-form="login">
-      <input class="in" name="email" type="email" placeholder="E-mail" required autocomplete="email">
-      <input class="in" name="password" type="password" placeholder="Hasło" required autocomplete="current-password">
+      ${mail()}
+      ${passField('Hasło', 'current-password', false)}
       <div class="actions"><button class="a solid">Zaloguj się</button></div>
     </form>
-    <p class="foot">Nie masz konta? <button class="a" data-go="register">Załóż rodzinę</button> albo poproś bliskich o link zaproszenia.
+    <p class="foot">Nie masz konta? ${S.data?.register === false ? 'Poproś bliskich o link zaproszenia.' : '<button class="a" data-go="register">Załóż rodzinę</button> albo poproś bliskich o link zaproszenia.'}
       ${S.data?.mail ? 'Nie pamiętasz hasła? <button class="a" data-go="forgot">Wyślemy link</button>' : 'Zapomniane hasło? Organizator rodziny wyśle Ci nowy link.'}</p>
   </section>`;
 }
@@ -612,6 +513,8 @@ function vLanding() {
   t.content.querySelector('[data-eve]').textContent = d ? `${d} ${pl(d, 'dzień', 'dni', 'dni')} do Wigilii` : 'Dziś Wigilia';
   t.content.querySelector('.theme').outerHTML = themeBtn();
   t.content.querySelector('.landing').classList.add('fade');
+  // instalacja dla jednej rodziny: nowych się nie zakłada, dołącza się z zaproszenia
+  if (S.data?.register === false) t.content.querySelectorAll('[data-go="register"]').forEach(b => b.remove());
   return t.innerHTML;
 }
 
@@ -653,10 +556,12 @@ function enterFamily(screen = 'lists') {
   history.replaceState(null, '', TABS[screen]);
   window.scrollTo(0, 0);
 }
-function go(screen) {
+const fromHash = () => Object.keys(PUBLIC).find(k => k !== 'landing' && PUBLIC[k] === location.hash) || Object.keys(TABS).find(k => TABS[k] === location.hash) || 'lists';
+function go(screen, push = true) {
   Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null });
   const hash = (S.data?.user ? TABS : PUBLIC)[screen];
-  if (hash) history.replaceState(null, '', hash);
+  // każdy ekran to wpis w historii — przycisk Wstecz wraca do poprzedniego, zamiast zamykać aplikację
+  if (hash && push && location.hash !== hash) history.pushState(null, '', hash);
   window.scrollTo(0, 0);
   render(true);
   if (screen === 'family') act(() => {});
@@ -666,6 +571,7 @@ function go(screen) {
 const topOffset = () => [...($('.topbar')?.children || [])].filter(e => !e.classList.contains('menu')).reduce((h, e) => h + e.offsetHeight, 0);
 function syncTop() { document.documentElement.style.setProperty('--top', topOffset() + 'px'); }
 addEventListener('resize', syncTop);
+addEventListener('popstate', () => { if (booted) go(fromHash(), false); });
 function markFits() {
   document.querySelectorAll('.fold').forEach(f => {
     const limit = parseFloat(getComputedStyle(f).getPropertyValue('--peek'));
@@ -702,21 +608,24 @@ function toggleFold(key, bulk = false) {
 }
 
 let toastTimer, undoFn = null;
-function toast(msg, undo) {
+// Zwykły komunikat znika sam (dłuższy tekst — później); błąd zostaje, aż ktoś go zamknie.
+function toast(msg, undo, sticky = false) {
   $('.toast')?.remove();
   clearTimeout(toastTimer);
   const el = document.createElement('div');
-  el.className = 'toast'; el.setAttribute('role', 'status');
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button data-act="undo">Cofnij</button>' : ''}`;
+  el.className = 'toast'; el.setAttribute('role', sticky ? 'alert' : 'status');
+  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button data-act="undo">Cofnij</button>' : ''}${sticky ? '<button data-act="close-toast">Zamknij</button>' : ''}`;
   document.body.appendChild(el);
   undoFn = undo || null;
-  toastTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, 4000);
+  if (!sticky) toastTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, Math.max(5000, msg.length * 80));
 }
 const focusFirst = () => setTimeout(() => $('.form .in')?.focus(), 0);
 function setTheme(t) {
   theme = t;
   try { localStorage.setItem('mikolaj.theme', t); } catch {}
   t === 'auto' ? document.documentElement.removeAttribute('data-theme') : document.documentElement.setAttribute('data-theme', t);
+  // pasek systemowy telefonu w kolorze tła
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = isDark() ? '#161616' : '#ffffff'; });
 }
 
 /* ===================== ZDARZENIA ===================== */
@@ -728,6 +637,7 @@ document.addEventListener('click', e => {
   if (!t) return;
   const d = t.dataset;
   if (!booted) return;
+  pressed = t; queueMicrotask(() => { pressed = null; });
   if (d.go) return go(d.go);
   if (d.toggle) { toggleFold(d.toggle); return syncAll(); }
   if (d.edit) { S.editWish = d.edit; S.adding = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); render(); return focusFirst(); }
@@ -754,6 +664,11 @@ document.addEventListener('click', e => {
       if (!d.sure) { S.confirm = { act: 'leave' }; return render(); }
       return act(async () => { await api('leave', 'POST'); enterFamily(); }, `Opuszczono rodzinę. Teraz: ${(S.data.families || []).find(f => f.memberId !== me().id)?.name || ''}`);
     case 'cancel-fam': S.token = null; S.info = null; return go('lists');
+    case 'close-toast': return $('.toast')?.remove();
+    case 'show-pass': {
+      const input = t.closest('form').querySelector('[name="password"]'), show = input.type === 'password';
+      input.type = show ? 'text' : 'password'; t.textContent = show ? 'Ukryj hasło' : 'Pokaż hasło'; return; }
+    case 'mails': { const on = !me().mails; return act(() => api('account', 'PATCH', { mails: on }), on ? 'Przypomnienia mailem włączone' : 'Nie będziemy wysyłać przypomnień mailem'); }
     case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
     // rezerwacje
@@ -825,7 +740,7 @@ document.addEventListener('click', e => {
       if (!d.sure) { S.confirm = { act: 'new-invite' }; return render(); }
       return act(async () => { await api('invite', 'POST'); S.confirm = null; }, 'Nowy link gotowy. Stary już nie działa.');
     case 'toggle-add': return act(() => api(`members/${id}`, 'PATCH', { canAdd: Boolean(d.on) }), 'Zapisano');
-    case 'save-manager': return act(() => api(`members/${id}`, 'PATCH', { managedBy: $('#f-manager').value }), 'Opiekun zmieniony');
+    case 'save-manager': return act(() => api(`members/${id}`, 'PATCH', { managedBy: $('#f-manager').value }), 'Zapisano, kto prowadzi listę');
     case 'make-admin':
       if (!d.sure) { S.confirm = { act: 'make-admin', id }; return render(); }
       return act(async () => { await api(`members/${id}`, 'PATCH', { admin: true }); S.screen = 'lists'; S.confirm = null; S.fam = null; history.replaceState(null, '', '#/'); }, 'Rola organizatora przekazana');
@@ -839,6 +754,7 @@ document.addEventListener('submit', e => {
   e.preventDefault();
   const form = e.target, body = Object.fromEntries(new FormData(form));
   const kind = form.dataset.form;
+  pressed = e.submitter; queueMicrotask(() => { pressed = null; });
   if (kind === 'rename') {
     const name = body.name.trim();
     if (!name || name === S.data.family?.name) return;
@@ -859,6 +775,7 @@ document.addEventListener('submit', e => {
     S.token = null; S.info = null;
     S.screen = { join: 'mine', register: 'family' }[kind] || 'lists';
     history.replaceState(null, '', TABS[S.screen]);
+    window.scrollTo(0, 0);
   }, kind === 'register' ? 'Rodzina założona. Skopiuj link zaproszenia i wyślij go bliskim.' : null);
 });
 
@@ -871,23 +788,25 @@ document.addEventListener('keydown', e => {
 });
 
 /* ===================== START ===================== */
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme === 'auto') render(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme === 'auto') { setTheme(theme); render(); } });
 async function start() {
   setTheme(theme);
   const hash = location.hash;
-  const token = hash.match(/^#(invite|link)=([a-f0-9]{64})$/);
-  if (token) {
+  const token = hash.match(/^#(invite|link|nomail)=([a-f0-9]{64})$/);
+  if (token?.[1] === 'nomail') {
+    history.replaceState(null, '', '#/');
+    api('mails/off', 'POST', { token: token[2] }).then(() => toast('Nie będziemy już wysyłać przypomnień na ten adres. Włączysz je z powrotem w menu pod swoim imieniem.'), err => toast(err.message, null, true));
+  } else if (token) {
     // Sekret tylko w pamięci — usuń go z paska adresu.
     history.replaceState(null, '', '#/');
     S.token = token[2];
     try {
       if (token[1] === 'invite') { S.info = await api(`invitation/${S.token}`); S.screen = 'join'; }
       if (token[1] === 'link') { S.info = await api(`link/${S.token}`); S.screen = 'link'; }
-    } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message), 0); }
-  } else {
-    S.screen = Object.keys(PUBLIC).find(k => k !== 'landing' && PUBLIC[k] === hash) || Object.keys(TABS).find(k => TABS[k] === hash) || 'lists';
+    } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message, null, true), 0); }
   }
-  try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message); }
+  if (!token || token[1] === 'nomail') S.screen = fromHash();
+  try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message, null, true); }
   // Zalogowany z zaproszeniem — dołącza tym samym kontem. Z linkiem do hasła/listy — najpierw link.
   if (S.token && S.data.user && S.screen === 'join') S.screen = 'joinfam';
   else if (S.token && S.data.user) S.data = { user: null };

@@ -7,7 +7,7 @@ import { webcrypto } from 'node:crypto';
 // Audit-only adapter. No network, production storage, credentials, or source edits.
 const source = readFileSync(new URL('../src/worker.js', import.meta.url), 'utf8');
 const results = [];
-function fixture(mail = false) {
+function fixture(mail = false, env = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys=ON');
   const sql = { exec(query, ...args) {
@@ -35,7 +35,7 @@ function fixture(mail = false) {
   });
   const imports = [...source.matchAll(/^import (\w+) from /gm)].map(m => `const ${m[1]}='';`).join('\n');
   vm.runInContext(imports + '\n' + source.replace(/^import .*;\n/gm, '').replace('export class FamilyStore', 'class FamilyStore').replace('export default {', 'globalThis.edge = {') + '\nglobalThis.Store=FamilyStore;', context);
-  const store = new context.Store(ctx, mail ? { RESEND_API_KEY: 'audit-stub' } : {});
+  const store = new context.Store(ctx, { OPEN_REGISTRATION: 'true', ...(mail ? { RESEND_API_KEY: 'audit-stub', MAIL_FROM: 'Audit <audit@example.test>', APP_URL: 'https://audit.example' } : {}), ...env });
   let ip = 0;
   async function call(path, method = 'GET', body, cookie, extra = {}) {
     const headers = { 'CF-Connecting-IP': '192.0.2.' + (++ip % 250), ...extra };
@@ -222,7 +222,7 @@ await check('Digest sends one mail per account across families', async () => {
 await check('Legacy members migrate to accounts', async () => {
   const f=fixture(), a=await f.register('A');
   // symulacja starej bazy: członek bez konta w tabeli accounts
-  f.db.exec("DELETE FROM sessions; DELETE FROM accounts; UPDATE members SET account_id=NULL");
+  f.db.exec("DELETE FROM sessions; DELETE FROM accounts; UPDATE members SET account_id=NULL; DELETE FROM meta WHERE key='schema'");
   const salt='s';
   const pw=await (async()=>{ const k=await webcrypto.subtle.importKey('raw',new TextEncoder().encode('legacy-pass'),'PBKDF2',false,['deriveBits']); return Buffer.from(await webcrypto.subtle.deriveBits({name:'PBKDF2',salt:new TextEncoder().encode(salt),iterations:100000,hash:'SHA-256'},k,256)).toString('hex'); })();
   f.db.prepare("UPDATE members SET email='legacy@example.test',salt=?,password_hash=? WHERE id=?").run(salt,pw,a.id);
@@ -262,5 +262,55 @@ await check('Only the organiser renames the family', async () => {
   assert.equal((await f.call('family','PATCH',{name:'Nowa nazwa'},a.cookie)).status,200);
   assert.equal((await f.call('state','GET',undefined,b.cookie)).body.family.name,'Nowa nazwa');
   assert.equal((await f.call('state','GET',undefined,c.cookie)).body.family.name,'C family');
+});
+await check('Closed registration allows only the first family', async () => {
+  const f=fixture(false,{OPEN_REGISTRATION:''}), a=await f.register('A');
+  assert.equal((await f.call('register','POST',{name:'B',email:'b@example.test',password:'long-audit-password',familyName:'B'})).status,403);
+  assert.equal((await f.call('families','POST',{familyName:'Second'},a.cookie)).status,403);
+  assert.equal((await f.call('state')).body.register,false);
+  assert.equal((await f.join(a,'C')).name,'C'); // zaproszenia działają dalej
+});
+await check('Invitation mail is limited per account, not per family', async () => {
+  const f=fixture(true), a=await f.register('A');
+  for(let i=0;i<20;i++) assert.equal((await f.call('invite/email','POST',{email:`x${i}@example.test`},a.cookie)).status,200);
+  assert.equal((await f.call('families','POST',{familyName:'Second'},a.cookie)).status,200); // nowe członkostwo, to samo konto
+  assert.equal((await f.call('invite/email','POST',{email:'y@example.test'},a.cookie)).status,429);
+  assert.equal(f.sent.some(m=>/\bA\b/.test(m.subject)),false); // temat bez treści od użytkownika
+});
+await check('Mail opt-out by link and from the account', async () => {
+  const f=fixture(true), a=await f.register('A'), b=await f.join(a,'B');
+  await f.addWish(b); await f.store.digest();
+  const token=f.sent.at(-1).text.match(/#nomail=([a-f0-9]{64})/)[1];
+  assert.equal((await f.call('mails/off','POST',{token})).status,200);
+  assert.equal((await f.call('state','GET',undefined,a.cookie)).body.user.mails,false);
+  const n=f.sent.length; await f.addWish(b,'Another'); await f.store.digest(); assert.equal(f.sent.length,n);
+  assert.equal((await f.call('account','PATCH',{mails:true},a.cookie)).body.state.user.mails,true);
+});
+await check('Scheduled jobs are not reachable over HTTP', async () => {
+  const f=fixture(true), a=await f.register('A');
+  for (const job of ['remind','digest']) {
+    assert.equal((await f.call(`internal/${job}`,'POST',{})).status,401);
+    assert.equal((await f.call(`internal/${job}`,'POST',{},a.cookie)).status,404);
+  }
+});
+await check('Login attempts are limited per account across addresses', async () => {
+  const f=fixture(), a=await f.register('A'); let last;
+  for(let i=0;i<21;i++) last=await f.call('login','POST',{email:a.email,password:'wrong-'+i}); // każde żądanie z innego IP
+  assert.equal(last.status,429);
+});
+await check('Writes return the fresh state; buyer sees a retitled wish', async () => {
+  const f=fixture(), a=await f.register('A'), b=await f.join(a,'B'), w=await f.addWish(b,'Book');
+  const r=await f.call(`wishes/${w}/reserve`,'POST',{},a.cookie);
+  assert.equal(r.body.state.wishes.find(x=>x.id===w).taken,'me');
+  const own=await f.call(`wishes/${w}`,'PATCH',{title:'Car',tier:'ok'},b.cookie);
+  assert.equal('taken' in own.body.state.wishes.find(x=>x.id===w),false); // obdarowany dalej nic nie widzi
+  assert.equal((await f.call('state','GET',undefined,a.cookie)).body.wishes.find(x=>x.id===w).prevTitle,'Book');
+});
+await check('Session is renewed on use', async () => {
+  const f=fixture(), a=await f.register('A');
+  f.db.exec('UPDATE sessions SET expires=expires-172800');
+  const before=f.db.prepare('SELECT expires FROM sessions').get().expires;
+  const r=await f.call('state','GET',undefined,a.cookie);
+  assert.equal(r.cookie,a.cookie); assert.ok(f.db.prepare('SELECT expires FROM sessions').get().expires>before);
 });
 console.log(JSON.stringify(results,null,2));

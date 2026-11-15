@@ -29,7 +29,7 @@ The app is in Polish, minimalist by design (white and dark grey, a serif for acc
 - **Kupuję** — what you've picked for others, grouped by recipient, with *mark as bought* and *give up*. The tab appears only once you've reserved something.
 - **Moje** — your own letter and wishes, plus any people you manage.
 - **Budget tiers instead of prices** — every wish is tagged *Drobnostki* (up to 50 zł), *Nie było niegrzecznie* (50–200 zł), *To był grzeczny rok* (200–300 zł) or *Byłem aniołkiem* (no limit). Lists are ordered by tier.
-- **Change notices** — if a wish's budget changes after you reserved it, you see what it was before.
+- **Change notices** — if a wish's title or budget changes after you reserved it, you see what it was before.
 - **Demo family** — the landing page opens a fully working example family in the browser, with no account and nothing saved.
 
 ### People without a phone
@@ -59,56 +59,81 @@ Sent through [Resend](https://resend.com) from `listdo@mikolaja.pl`:
 - a daily noon digest: new free wishes from relatives, and a reminder about gifts you picked but haven't bought yet,
 - a reminder three weeks before Christmas Eve (3 December).
 
-No e-mail ever reveals who is buying what for whom.
+No e-mail ever reveals who is buying what for whom. The digest and the reminder carry a *don't send me these* link and can be switched back on from the menu under your name; invitations are limited per account and per day.
 
 ## Architecture
 
 ```
 public/            frontend — plain HTML, CSS and ES-module JavaScript, no build step
   index.html       includes the pre-rendered landing page, so it paints before any JavaScript
-  app.css          inlined into the HTML by the Worker (nonce'd <style>), also served on its own
-  app.js
-  *.woff2          self-hosted Inter and Newsreader: a preloaded core (Latin + Polish) and an -ext part
-                   for other Latin letters, fetched only when such a character is on the page
+  app.css          inlined into the HTML by the Worker (nonce'd <style>)
+  app.js           the whole interface
+  demo.js          the demo family — fetched only when someone opens it
+  newsreader*.woff2   self-hosted serif: a preloaded core (Latin + Polish) and an -ext part for other
+                   Latin letters, fetched only when such a character is on the page; body text uses the system font
   *.png, *.webp, favicon.ico, site.webmanifest   icons and web-app manifest
 src/worker.js      Cloudflare Worker + one SQLite-backed Durable Object (FamilyStore)
-scripts/
-  deploy.py              uploads the sources to the existing Worker via the Cloudflare API
-  verify_deployment.py   checks the live revision, every public file byte for byte, CSP and the API
-  branch_head_guard.py   skips superseded CI runs so an old run can never overwrite a newer one
-.github/workflows/deploy.yml   push to master → check → upload → verify
+wrangler.toml      the whole configuration of an installation
+tests/security.mjs security regression tests against an in-memory SQLite database
+scripts/verify_deployment.py   checks the live revision, every public file byte for byte, CSP and the API
+.github/workflows/deploy.yml   push to master → tests → deploy → verify
 ```
 
 - **Only the landing page is public.** Search engines may index `/` (robots.txt, sitemap, canonical, JSON-LD); everything else lives behind `/api/` (disallowed, `X-Robots-Tag: noindex`, login required) or after the `#` in the URL, which never reaches a server.
-- **No dependencies and no bundler.** The Worker imports the frontend files directly; images and fonts are uploaded as data modules. Icons and fonts are cached for a year, so a changed file needs a new name.
-- **One API call for the whole UI.** `GET /api/state` returns everything the signed-in person may see, already trimmed by the server; the client re-renders from it after each action.
+- **No dependencies and no bundler.** Files in `public/` are served by Cloudflare's static assets (ETags, compression); the Worker adds security headers and handles `/` and `/api/`. Icons and fonts are cached for a year, so a changed file needs a new name.
+- **One response per action.** `GET /api/state` returns everything the signed-in person may see, already trimmed by the server; every write answers with the fresh state, so the client re-renders without asking again.
 - **Many families, one store.** All families live in one Durable Object, every query is scoped by family, and families never see each other.
-- **Additive migrations.** Schema changes run at start-up and only add columns or tables; existing data is never removed.
+- **Additive migrations.** Schema changes are numbered, run once, and only add columns or tables; existing data is never removed.
 
 ## Security and privacy
 
 - Passwords: PBKDF2-SHA256, 100,000 iterations, random salt.
-- Sessions: random 256-bit token, only its hash is stored; `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 30 days.
-- Writes require the app's own `Origin` and a JSON body; requests are rate-limited per IP.
+- Sessions: random 256-bit token, only its hash is stored; `__Host-` cookie, `HttpOnly`, `Secure`, `SameSite=Strict`, 90 days, renewed on use.
+- Writes require the app's own `Origin` and a JSON body; requests are rate-limited per IP, sign-in attempts also per account.
 - Strict Content-Security-Policy with a per-response script nonce.
 - One-time links (invitations, password resets, account hand-over) carry 256-bit secrets in the URL fragment and are removed from the address bar on load.
 - All permissions — ownership, managers, organiser mode — are checked on the server.
+- Scheduled jobs call the Durable Object directly (RPC); they have no HTTP route.
 
-## Deployment
+## Run your own
 
-Every push to `master` deploys to **https://list.do.mikolaja.pl** through GitHub Actions:
+You need a free Cloudflare account and Node.js; nothing is installed into the project.
 
-1. syntax check of the frontend and the Worker,
-2. guard against superseded runs,
-3. upload to the existing `mikolaj` Worker (bindings, secrets and the Durable Object namespace are preserved),
-4. verification of `/version.json`, every file in `public/`, the CSP and the anonymous API.
+1. Edit `[vars]` in `wrangler.toml`:
+   - `APP_URL` — the address of your copy (leave empty to use the `*.workers.dev` address Cloudflare gives you),
+   - `MAIL_FROM` — sender of e-mails, on a domain verified in [Resend](https://resend.com),
+   - `OPEN_REGISTRATION` — `"true"` lets anyone on the internet start a family; anything else allows only the first family, and everyone else joins by invitation. For a private copy leave it empty.
+2. Deploy:
+   ```bash
+   npx wrangler deploy
+   ```
+3. Optional — e-mail (password reset, invitations, digests). Without it the app works; a forgotten password then means a new invitation.
+   ```bash
+   npx wrangler secret put RESEND_API_KEY
+   ```
 
-The old address `mikolaj.walasek.xyz`, as well as `mikolaja.pl` and `mikołaja.pl`, redirect to the app. The live revision is always available at [`/version.json`](https://list.do.mikolaja.pl/version.json).
+Open the address, start your family, send the invitation link. To attach your own domain, add it to the Worker in the Cloudflare dashboard and set `APP_URL` to it.
 
-The workflow needs a `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_ZONE_ID` variables. `RESEND_API_KEY` is a Worker secret set in Cloudflare and is inherited on every deploy.
+## Deployment of list.do.mikolaja.pl
+
+Every push to `master` goes through GitHub Actions: syntax check and security tests, `wrangler deploy`, then verification of `/version.json`, every file in `public/`, the CSP and the anonymous API. A failing test stops the deploy. The live revision is always at [`/version.json`](https://list.do.mikolaja.pl/version.json).
+
+The workflow needs a `CLOUDFLARE_API_TOKEN` secret and the `CLOUDFLARE_ACCOUNT_ID` variable. Other domains pointing at the Worker redirect to `APP_URL`.
 
 > **Do not rename** the `mikolaj` Worker, the `FamilyStore` class or the `family-v1` store name — that would detach the app from its existing data.
 
 ## Local development
 
-There is nothing to install. Serve `public/` with any static server to work on the interface — the **demo family** on the landing page runs entirely in the browser without the API. Backend changes are best tested against the Worker's `FamilyStore` with an in-memory SQLite database (for example Node's built-in `node:sqlite`).
+```bash
+npx wrangler dev
+```
+
+runs the whole app — frontend, API and a local database — at `http://localhost:8787`. Tests need only Node.js 22.5 or newer:
+
+```bash
+node tests/security.mjs
+```
+
+## License
+
+[MIT](LICENSE)

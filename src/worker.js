@@ -1,40 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
-import html from '../public/index.html';
-import css from '../public/app.css';
-import app from '../public/app.js';
-import manifest from '../public/site.webmanifest';
-// Ikony: binarne moduły danych (ArrayBuffer).
-import faviconIco from '../public/favicon.ico';
-import favicon16 from '../public/favicon-16x16.png';
-import favicon32 from '../public/favicon-32x32.png';
-import favicon48 from '../public/favicon-48x48.png';
-import favicon96 from '../public/favicon-96x96.png';
-import touch from '../public/apple-touch-icon.png';
-import touch120 from '../public/apple-touch-icon-120x120.png';
-import touch152 from '../public/apple-touch-icon-152x152.png';
-import touch167 from '../public/apple-touch-icon-167x167.png';
-import icon192 from '../public/icon-192x192.png';
-import icon512 from '../public/icon-512x512.png';
-import iconMaskable from '../public/icon-maskable-512x512.png';
-import mark from '../public/mark.webp';
-import ogImage from '../public/og.png';
-import fontInter400 from '../public/inter-400.woff2';
-import fontInter500 from '../public/inter-500.woff2';
-import fontInter400Ext from '../public/inter-400-ext.woff2';
-import fontInter500Ext from '../public/inter-500-ext.woff2';
-import fontNewsreaderExt from '../public/newsreader-ext.woff2';
-import fontNewsreaderItalicExt from '../public/newsreader-italic-ext.woff2';
-import fontNewsreader from '../public/newsreader.woff2';
-import fontNewsreaderItalic from '../public/newsreader-italic.woff2';
-
 const encoder = new TextEncoder();
-const SESSION_AGE = 60 * 60 * 24 * 30;
+const SESSION_AGE = 60 * 60 * 24 * 90; // odnawiana przy każdym otwarciu aplikacji
 const LINK_AGE = 60 * 60 * 24 * 3;
 const COOKIE = '__Host-mikolaj';
 const TIERS = ['small', 'ok', 'good', 'angel'];
-// wyszukiwarki widzą tylko stronę startową; listy, rodziny i tokeny są za /api/ albo po # w adresie
-const ROBOTS = 'User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://list.do.mikolaja.pl/sitemap.xml\n';
-const SITEMAP = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://list.do.mikolaja.pl/</loc></url></urlset>\n';
 const SECURITY = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
@@ -61,6 +30,9 @@ function text(value, label, max, required = false) {
   if (typeof value !== 'string' || value.length > max || (required && !value.trim())) fail(400, `Sprawdź pole „${label}” (maks. ${max} znaków).`);
   return value.trim();
 }
+// pole jednowierszowe (imię, nazwa, tytuł): bez znaków nowej linii i sterujących
+const line = (...args) => text(...args).replace(/\s+/g, ' ');
+const inviteToken = value => (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)) ? digest(value) : fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
 const email = value => {
   const e = text(value, 'E-mail', 254, true).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) fail(400, 'Podaj poprawny adres e-mail.');
@@ -71,7 +43,7 @@ const password = value => {
   return value;
 };
 function wishFields(body) {
-  const title = text(body.title, 'Co chcesz dostać?', 160, true);
+  const title = line(body.title, 'Co chcesz dostać?', 160, true);
   const note = text(body.note ?? '', 'Wskazówki', 1500);
   let url = text(body.url ?? '', 'Link', 2000);
   if (url) {
@@ -86,13 +58,14 @@ const tierOf = price => price == null ? 'ok' : price < 50 ? 'small' : price < 20
 const pl = (n, one, few, many) => n === 1 ? one : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) ? few : many;
 
 /* ---------- maile (Resend) ---------- */
-const MAIL_FROM = 'Mikołaj <listdo@mikolaja.pl>';
-const APP_URL = 'https://list.do.mikolaja.pl';
+// Włączone, gdy są RESEND_API_KEY i MAIL_FROM. Każda wiadomość niesie `base` — adres aplikacji do linków.
+const mailOn = env => Boolean(env.RESEND_API_KEY && env.MAIL_FROM);
 const escHtml = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
 const SERIF = "Georgia,'Times New Roman',serif";
 // Ta sama estetyka co strona: biel, ciemna szarość, szeryf w nagłówku, mały prostokątny przycisk.
-function mailHtml({ heading, lines = [], quote, button, foot }) {
+function mailHtml({ heading, lines = [], quote, button, foot, off, base }) {
+  const site = new URL(base).host;
   const td = (style, inner) => `<tr><td style="${style}">${inner}</td></tr>`;
   return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>${escHtml(heading)}</title></head>
 <body style="margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%;">
@@ -103,17 +76,17 @@ ${td(`font:400 36px/1.08 ${SERIF};color:#262626;letter-spacing:-0.5px;padding:0 
 ${lines.map(l => td(`font:400 16px/1.6 ${SANS};color:#6b6b6b;padding:0 0 14px;`, escHtml(l))).join('\n')}
 ${quote ? td(`font:italic 400 18px/1.6 ${SERIF};color:#6b6b6b;padding:14px 0 18px;`, `<span style="color:#262626;">Drogi Mikołaju,</span> ${escHtml(quote)}`) : ''}
 ${button ? td('padding:18px 0 8px;', `<a href="${escHtml(button.url)}" style="display:inline-block;background:#262626;color:#ffffff;font:500 15px/1 ${SANS};text-decoration:none;padding:13px 18px;border-radius:4px;">${escHtml(button.label)}</a>`) : ''}
-${td(`font:400 13px/1.6 ${SANS};color:#8c8c8c;padding:44px 0 0;`, `${foot ? escHtml(foot) + '<br>' : ''}<a href="${APP_URL}" style="color:#8c8c8c;">list.do.mikolaja.pl</a> — rodzinne listy do Mikołaja`)}
+${td(`font:400 13px/1.6 ${SANS};color:#8c8c8c;padding:44px 0 0;`, `${foot ? escHtml(foot) + '<br>' : ''}${off ? `<a href="${escHtml(off)}" style="color:#8c8c8c;">Nie chcę dostawać tych maili</a><br>` : ''}<a href="${escHtml(base)}" style="color:#8c8c8c;">${escHtml(site)}</a> — rodzinne listy do Mikołaja`)}
 </table></td></tr></table></body></html>`;
 }
-const mailText = ({ heading, lines = [], quote, button, foot }) =>
-  [heading, '', ...lines, quote ? `\nDrogi Mikołaju, ${quote}` : '', button ? `\n${button.label}: ${button.url}` : '', '', foot || '', 'list.do.mikolaja.pl — rodzinne listy do Mikołaja'].join('\n').replace(/\n{3,}/g, '\n\n');
+const mailText = ({ heading, lines = [], quote, button, foot, off, base }) =>
+  [heading, '', ...lines, quote ? `\nDrogi Mikołaju, ${quote}` : '', button ? `\n${button.label}: ${button.url}` : '', '', foot || '', off ? `Nie chcę dostawać tych maili: ${off}` : '', `${new URL(base).host} — rodzinne listy do Mikołaja`].join('\n').replace(/\n{3,}/g, '\n\n');
 async function sendMail(env, to, message) {
-  if (!env.RESEND_API_KEY) fail(503, 'Wysyłanie maili nie jest jeszcze włączone.');
+  if (!mailOn(env)) fail(503, 'Wysyłanie maili nie jest włączone.');
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.RESEND_API_KEY.trim()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: MAIL_FROM, to: [to], subject: message.subject, html: mailHtml(message), text: mailText(message) }),
+    body: JSON.stringify({ from: env.MAIL_FROM, to: [to], subject: message.subject, html: mailHtml(message), text: mailText(message) }),
   });
   // Bez treści i adresów w logach.
   if (!res.ok) { console.error('Mikolaj mail failed', res.status, (await res.json().catch(() => ({}))).name); fail(502, 'Nie udało się wysłać maila. Spróbuj ponownie za chwilę.'); }
@@ -121,47 +94,63 @@ async function sendMail(env, to, message) {
 
 const cookie = (token, age = SESSION_AGE) => `${COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${age}`;
 
+const SCHEMA = 2;
 export class FamilyStore extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.ctx = ctx; this.env = env; this.sql = ctx.storage.sql;
+    // Aktualny kształt bazy. Konto (e-mail + hasło) jest osobno od członkostwa — jedna osoba może być w wielu
+    // rodzinach, w każdej z własnym listem, życzeniami i rolą; sesja wskazuje aktywne członkostwo.
+    // Zaszłości zostawione celowo (dane nigdy nie są usuwane): members.email/salt/password_hash to zaślepki
+    // sprzed tabeli accounts, wishes.price — cena sprzed przedziałów.
     this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS family (id TEXT PRIMARY KEY, name TEXT NOT NULL, invite TEXT NOT NULL, invite_hash TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, family_id TEXT NOT NULL REFERENCES family(id), name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, letter TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS wishes (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, title TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', price REAL, created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS reservations (wish_id TEXT PRIMARY KEY REFERENCES wishes(id) ON DELETE CASCADE, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, purchased INTEGER NOT NULL DEFAULT 0, snapshot TEXT NOT NULL DEFAULT '{}');
+      CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, last_member TEXT, mails INTEGER NOT NULL DEFAULT 1, mail_token TEXT);
+      CREATE TABLE IF NOT EXISTS members (id TEXT PRIMARY KEY, family_id TEXT NOT NULL REFERENCES family(id), name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, letter TEXT NOT NULL DEFAULT '', managed_by TEXT, can_add INTEGER NOT NULL DEFAULT 0, account_id TEXT);
+      CREATE TABLE IF NOT EXISTS sessions (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires INTEGER NOT NULL, admin_until INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS wishes (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, title TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', price REAL, created_at TEXT NOT NULL, tier TEXT);
+      CREATE TABLE IF NOT EXISTS reservations (wish_id TEXT PRIMARY KEY REFERENCES wishes(id) ON DELETE CASCADE, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, purchased INTEGER NOT NULL DEFAULT 0, snapshot TEXT NOT NULL DEFAULT '{}', reserved_at INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS links (hash TEXT PRIMARY KEY, member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS wishes_owner ON wishes(owner_id);
-      CREATE INDEX IF NOT EXISTS reservations_member ON reservations(member_id);
-      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
     `);
-    // Migracje dodające kolumny — idempotentne, nie ruszają istniejących danych.
+    // Starsze bazy dochodzą do tego kształtu migracjami — każda biegnie raz, numer wersji leży w meta.
+    const version = Number(this.one("SELECT value FROM meta WHERE key='schema'")?.value || 0);
+    if (version < SCHEMA) ctx.storage.transactionSync(() => {
+      this.migrate(version);
+      this.sql.exec("INSERT INTO meta(key,value) VALUES('schema',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", String(SCHEMA));
+    });
+  }
+  // Migracje tylko dodają kolumny i uzupełniają dane; są idempotentne.
+  migrate(from) {
     const addColumn = (table, column, type) => {
       if (!this.rows(`PRAGMA table_info(${table})`).some(c => c.name === column)) this.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     };
-    addColumn('reservations', 'snapshot', "TEXT NOT NULL DEFAULT '{}'");
-    addColumn('members', 'managed_by', 'TEXT');           // osoba bez konta — list prowadzi ten członek
-    addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
-    addColumn('wishes', 'tier', 'TEXT');
-    addColumn('reservations', 'reserved_at', 'INTEGER NOT NULL DEFAULT 0'); // do przypomnienia „masz to kupić”
-    addColumn('sessions', 'admin_until', 'INTEGER NOT NULL DEFAULT 0'); // tryb organizatora — per sesja, wygasa sam
-    // Konto (e-mail + hasło) jest osobno od członkostwa — jedna osoba może być w wielu rodzinach,
-    // w każdej z własnym listem, życzeniami i rolą. Sesja wskazuje aktywne członkostwo.
-    this.sql.exec('CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, salt TEXT NOT NULL, password_hash TEXT NOT NULL, last_member TEXT)');
-    addColumn('members', 'account_id', 'TEXT');
-    this.sql.exec('CREATE INDEX IF NOT EXISTS members_account ON members(account_id)');
-    // Jednorazowo: każdy dotychczasowy członek z kontem dostaje konto o tym samym id.
-    // Stare kolumny members.email/salt/password_hash zostają nietknięte — dotychczasowe konta działają też po ewentualnym cofnięciu wdrożenia.
-    const legacy = 'managed_by IS NULL AND account_id IS NULL';
-    if (this.one(`SELECT 1 AS x FROM members WHERE ${legacy} LIMIT 1`)) ctx.storage.transactionSync(() => {
+    if (from < 1) {
+      addColumn('reservations', 'snapshot', "TEXT NOT NULL DEFAULT '{}'");
+      addColumn('members', 'managed_by', 'TEXT');
+      addColumn('members', 'can_add', 'INTEGER NOT NULL DEFAULT 0');
+      addColumn('wishes', 'tier', 'TEXT');
+      addColumn('reservations', 'reserved_at', 'INTEGER NOT NULL DEFAULT 0');
+      addColumn('sessions', 'admin_until', 'INTEGER NOT NULL DEFAULT 0');
+      addColumn('members', 'account_id', 'TEXT');
+      // Każdy dotychczasowy członek z własnym logowaniem dostaje konto o tym samym id.
+      const legacy = 'managed_by IS NULL AND account_id IS NULL';
       this.sql.exec(`INSERT INTO accounts(id,email,salt,password_hash,last_member) SELECT id,email,salt,password_hash,id FROM members WHERE ${legacy}`);
       this.sql.exec(`UPDATE members SET account_id=id WHERE ${legacy}`);
-    });
-    this.sql.exec("UPDATE wishes SET tier = CASE WHEN price IS NULL THEN 'ok' WHEN price < 50 THEN 'small' WHEN price < 200 THEN 'ok' WHEN price <= 300 THEN 'good' ELSE 'angel' END WHERE tier IS NULL");
-    this.sql.exec("UPDATE reservations SET snapshot=(SELECT json_object('title',title,'note',note,'url',url,'tier',tier) FROM wishes WHERE wishes.id=reservations.wish_id) WHERE snapshot='{}'");
+      this.sql.exec("UPDATE wishes SET tier = CASE WHEN price IS NULL THEN 'ok' WHEN price < 50 THEN 'small' WHEN price < 200 THEN 'ok' WHEN price <= 300 THEN 'good' ELSE 'angel' END WHERE tier IS NULL");
+      this.sql.exec("UPDATE reservations SET snapshot=(SELECT json_object('title',title,'note',note,'url',url,'tier',tier) FROM wishes WHERE wishes.id=reservations.wish_id) WHERE snapshot='{}'");
+    }
+    if (from < 2) {
+      addColumn('accounts', 'mails', 'INTEGER NOT NULL DEFAULT 1');   // 0 — bez przypomnień mailem
+      addColumn('accounts', 'mail_token', 'TEXT');                    // sekret w linku „nie chcę tych maili”
+    }
+    this.sql.exec(`
+      CREATE INDEX IF NOT EXISTS wishes_owner ON wishes(owner_id);
+      CREATE INDEX IF NOT EXISTS reservations_member ON reservations(member_id);
+      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires);
+      CREATE INDEX IF NOT EXISTS members_account ON members(account_id);
+    `);
   }
   rows(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
   one(query, ...args) { return this.rows(query, ...args)[0]; }
@@ -169,6 +158,30 @@ export class FamilyStore extends DurableObject {
     this.sql.exec('DELETE FROM limits WHERE expires < ?', now());
     this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1', key, now() + seconds);
     if (this.one('SELECT count FROM limits WHERE key=?', key).count > max) fail(429, 'Za dużo prób. Spróbuj ponownie za kilkanaście minut.');
+  }
+  // Adres aplikacji do linków: stały z konfiguracji albo ten, pod którym przyszło żądanie.
+  base(url) { return this.env.APP_URL?.replace(/\/+$/, '') || url?.origin; }
+  // Zakładanie rodzin: otwarte dla wszystkich albo — domyślnie — tylko pierwsza rodzina w tej instalacji.
+  canRegister() { return this.env.OPEN_REGISTRATION === 'true' || !this.one('SELECT 1 AS x FROM family LIMIT 1'); }
+  who(sessionHash) {
+    return sessionHash ? this.one('SELECT m.*,s.admin_until,s.expires,a.email AS login,a.mails FROM sessions s JOIN members m ON m.id=s.member_id JOIN accounts a ON a.id=m.account_id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
+  }
+  // Konto dla e-maila i hasła: istniejące (hasło musi pasować) albo dane nowego.
+  // KDF jest asynchroniczny, więc wynik potwierdza claim() — już w transakcji.
+  async credentials(mail, pass, wrong) {
+    this.rateLimit(`login:${await digest(mail)}`, 20, 900);
+    const existing = this.one('SELECT * FROM accounts WHERE email=?', mail);
+    const salt = existing?.salt || random(), hash = await passwordHash(pass, salt);
+    if (existing && !constantEqual(hash, existing.password_hash)) fail(409, wrong);
+    return existing || { id: crypto.randomUUID(), email: mail, salt, password_hash: hash, fresh: true };
+  }
+  claim(account) {
+    if (!account.fresh) {
+      if (this.one('SELECT password_hash FROM accounts WHERE id=?', account.id)?.password_hash !== account.password_hash) fail(409, 'Dane logowania zmieniły się. Spróbuj ponownie.');
+    } else {
+      if (this.one('SELECT id FROM accounts WHERE email=?', account.email)) fail(409, 'Ten adres ma już konto. Spróbuj się zalogować.');
+      this.sql.exec('INSERT INTO accounts(id,email,salt,password_hash) VALUES(?,?,?,?)', account.id, account.email, account.salt, account.password_hash);
+    }
   }
   // Członkostwo konta, w które wchodzimy: wskazane, ostatnio używane albo pierwsze.
   pickMember(accountId, preferred) {
@@ -187,13 +200,14 @@ export class FamilyStore extends DurableObject {
       this.sql.exec('INSERT INTO sessions(hash,member_id,expires) VALUES(?,?,?)', hash, m.id, now() + SESSION_AGE);
       this.sql.exec('UPDATE accounts SET last_member=? WHERE id=?', m.id, account.id);
     });
-    return json({ ok: true }, 200, { 'Set-Cookie': cookie(token) });
+    return json({ ok: true, state: this.state(this.who(hash)) }, 200, { 'Set-Cookie': cookie(token) });
   }
   async newFamily(name) {
     const invite = random();
-    return { id: crypto.randomUUID(), name: text(name, 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
+    return { id: crypto.randomUUID(), name: line(name, 'Nazwa rodziny', 80, true), invite, invite_hash: await digest(invite) };
   }
   insertFamily(f) { // w transakcji
+    if (!this.canRegister()) fail(403, 'Zakładanie nowych rodzin jest tu wyłączone. Poproś bliskich o zaproszenie.');
     if (this.one('SELECT COUNT(*) AS n FROM family').n >= 2000) fail(503, 'Chwilowo nie można zakładać nowych rodzin. Spróbuj później.');
     this.sql.exec('INSERT INTO family(id,name,invite,invite_hash) VALUES(?,?,?,?)', f.id, f.name, f.invite, f.invite_hash);
   }
@@ -214,15 +228,19 @@ export class FamilyStore extends DurableObject {
     });
     return token;
   }
-  async link(member, origin) { return json({ url: `${origin}/#link=${await this.newLink(member)}` }); }
-  // Raz w roku, trzy tygodnie przed Wigilią: co zostało do kupienia i czy jest list.
+  // Link „nie chcę tych maili” — sekret konta, tworzony przy pierwszej wysyłce.
+  offLink(acct, base) {
+    if (!acct.mail_token) { acct.mail_token = random(); this.sql.exec('UPDATE accounts SET mail_token=? WHERE id=?', acct.mail_token, acct.id); }
+    return `${base}/#nomail=${acct.mail_token}`;
+  }
+  // Raz w roku, trzy tygodnie przed Wigilią: co zostało do kupienia i czy jest list. Woła harmonogram (RPC).
   async remind() {
-    const year = new Date().getUTCFullYear();
-    if (this.one('SELECT key FROM limits WHERE key=?', `remind:${year}`)) return { sent: 0 };
-    this.sql.exec('INSERT INTO limits(key,count,expires) VALUES(?,1,?)', `remind:${year}`, now() + 60 * 60 * 24 * 300);
+    const year = String(new Date().getUTCFullYear()), base = this.base();
+    if (!mailOn(this.env) || !base || this.one("SELECT value FROM meta WHERE key='remind'")?.value === year) return { sent: 0 };
+    this.sql.exec("INSERT INTO meta(key,value) VALUES('remind',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", year);
     let sent = 0;
     // Jeden mail na konto — z każdej rodziny, w której ta osoba jest.
-    for (const acct of this.rows('SELECT id,email FROM accounts')) {
+    for (const acct of this.rows('SELECT id,email,mail_token FROM accounts WHERE mails=1')) {
       const ms = this.memberships(acct.id);
       if (!ms.length) continue;
       const lines = [];
@@ -235,14 +253,14 @@ export class FamilyStore extends DurableObject {
       }
       if (!lines.length) continue;
       try {
-        await sendMail(this.env, acct.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${ms[0].name}`, lines, button: { label: 'Otwórz listy', url: APP_URL } });
+        await sendMail(this.env, acct.email, { subject: 'Za trzy tygodnie Wigilia', heading: `Za trzy tygodnie Wigilia, ${ms[0].name}`, lines, button: { label: 'Otwórz listy', url: base }, off: this.offLink(acct, base), base });
         sent++;
       } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
     }
     return { sent };
   }
 
-  // Codziennie w południe, jeden mail na osobę (tylko gdy jest o czym pisać):
+  // Codziennie w południe, jeden mail na osobę (tylko gdy jest o czym pisać). Woła harmonogram (RPC).
   //  1) prezenty, które od poprzedniego razu wybrałem do kupienia i jeszcze nie kupiłem — przypomnienie,
   //  2) nowe, wolne życzenia innych (nie moje i nie te, które sam wpisałem za kogoś).
   async digest() {
@@ -250,7 +268,8 @@ export class FamilyStore extends DurableObject {
     const since = this.one("SELECT value FROM meta WHERE key='digest'")?.value || new Date(Date.now() - 864e5).toISOString();
     // Najpierw zapisujemy znacznik — ponowne uruchomienie nie wyśle drugi raz tego samego.
     this.sql.exec("INSERT INTO meta(key,value) VALUES('digest',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", until);
-    if (!this.env.RESEND_API_KEY) return { sent: 0 };
+    const base = this.base();
+    if (!mailOn(this.env) || !base) return { sent: 0 };
     const fresh = this.rows(`SELECT w.title,w.owner_id,m.name AS owner,m.managed_by,m.family_id FROM wishes w JOIN members m ON m.id=w.owner_id
       LEFT JOIN reservations r ON r.wish_id=w.id WHERE w.created_at>? AND w.created_at<=? AND r.wish_id IS NULL ORDER BY m.name,w.created_at`, since, until);
     const picks = this.rows(`SELECT r.member_id,w.title,w.owner_id,m.name AS owner,m.family_id FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id
@@ -267,8 +286,8 @@ export class FamilyStore extends DurableObject {
     };
     let sent = 0;
     // Jeden mail na konto; przy kilku rodzinach każda ma swój nagłówek.
-    const accounts = families.length ? this.rows(`SELECT DISTINCT a.id,a.email FROM accounts a JOIN members m ON m.account_id=a.id
-      WHERE m.family_id IN (SELECT value FROM json_each(?))`, JSON.stringify(families)) : [];
+    const accounts = families.length ? this.rows(`SELECT DISTINCT a.id,a.email,a.mail_token FROM accounts a JOIN members m ON m.account_id=a.id
+      WHERE a.mails=1 AND m.family_id IN (SELECT value FROM json_each(?))`, JSON.stringify(families)) : [];
     for (const acct of accounts) {
       const ms = this.memberships(acct.id);
       const lines = [];
@@ -279,15 +298,15 @@ export class FamilyStore extends DurableObject {
         if (!mine.length && !news.length) continue;
         const todo = this.one('SELECT COUNT(*) AS n FROM reservations WHERE member_id=? AND purchased=0', p.id).n;
         if (ms.length > 1) lines.push(`— ${p.family} —`);
-        if (mine.length) { anyMine = true; lines.push('Pamiętaj — wybrałeś(-aś) do kupienia:', ...byOwner(mine), `Wszystkich prezentów do kupienia: ${todo}.`); }
+        if (mine.length) { anyMine = true; lines.push('Pamiętaj — kupujesz:', ...byOwner(mine), `Wszystkich prezentów do kupienia: ${todo}.`); }
         if (news.length) lines.push(mine.length ? 'Na listach pojawiły się też nowe życzenia:' : 'Na listach pojawiły się nowe życzenia — może coś z tego kupisz?', ...byOwner(news));
       }
       if (!lines.length) continue;
-      const name = ms[0].name;
+      const common = { heading: `Cześć, ${ms[0].name}`, lines, off: this.offLink(acct, base), base };
       try {
         await sendMail(this.env, acct.email, anyMine
-          ? { subject: 'Pamiętaj o prezentach do kupienia', heading: `Cześć, ${name}`, lines, button: { label: 'Otwórz Kupuję', url: `${APP_URL}/#/kupuje` }, foot: 'Gdy coś kupisz, odhacz to w zakładce Kupuję. Raz dziennie, tylko gdy jest o czym przypomnieć.' }
-          : { subject: 'Nowe życzenia na listach', heading: `Cześć, ${name}`, lines, button: { label: 'Zobacz listy', url: APP_URL }, foot: 'Pomijamy prezenty, które ktoś już wybrał. Raz dziennie, tylko gdy coś się pojawi.' });
+          ? { ...common, subject: 'Pamiętaj o prezentach do kupienia', button: { label: 'Otwórz Kupuję', url: `${base}/#/kupuje` }, foot: 'Gdy coś kupisz, oznacz to w zakładce Kupuję. Raz dziennie, tylko gdy jest o czym przypomnieć.' }
+          : { ...common, subject: 'Nowe życzenia na listach', button: { label: 'Zobacz listy', url: base }, foot: 'Pomijamy prezenty, które ktoś już kupuje. Raz dziennie, tylko gdy coś się pojawi.' });
         sent++;
       } catch { /* jedna nieudana wysyłka nie zatrzymuje reszty */ }
     }
@@ -317,6 +336,8 @@ export class FamilyStore extends DurableObject {
 
   // Wszystko, czego potrzebuje aplikacja — przycięte do tego, co ta osoba może wiedzieć.
   state(me) {
+    const flags = { mail: mailOn(this.env), register: this.canRegister() };
+    if (!me) return { user: null, ...flags };
     const god = this.god(me);
     const family = this.one('SELECT name FROM family WHERE id=?', me.family_id);
     const members = this.rows('SELECT id,name,letter,managed_by FROM members WHERE family_id=? ORDER BY name COLLATE NOCASE', me.family_id)
@@ -334,11 +355,12 @@ export class FamilyStore extends DurableObject {
         const snap = JSON.parse(w.snapshot || '{}');
         const was = snap.tier ?? tierOf(snap.price);
         if (was !== w.tier) wish.prevTier = was;
+        if (snap.title && snap.title !== w.title) wish.prevTitle = snap.title;
       }
       return wish;
     });
     const families = this.memberships(me.account_id).map(m => ({ memberId: m.id, name: m.family, isAdmin: Boolean(m.is_admin) }));
-    return { user: { id: me.id, name: me.name, email: me.login, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0 }, family, families, members, wishes };
+    return { user: { id: me.id, name: me.name, email: me.login, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0, mails: Boolean(me.mails) }, family, families, members, wishes, ...flags };
   }
   god(me) { return Boolean(me.is_admin) && me.admin_until > now(); }
   // Przegląd organizatora — bez rezerwacji na jego własnej liście.
@@ -372,7 +394,6 @@ export class FamilyStore extends DurableObject {
       if ((origin && origin !== url.origin) || request.headers.get('Sec-Fetch-Site') === 'cross-site') fail(403, 'Ta operacja wymaga otwarcia aplikacji w jej własnej domenie.');
       if (method !== 'DELETE') {
         if (!request.headers.get('Content-Type')?.toLowerCase().startsWith('application/json')) fail(415, 'Oczekiwano danych JSON.');
-        if (Number(request.headers.get('Content-Length')) > 16000) fail(413, 'Przesłany formularz jest za duży.');
         const reader = request.body?.getReader();
         const chunks = []; let size = 0;
         if (reader) {
@@ -386,9 +407,7 @@ export class FamilyStore extends DurableObject {
         }
         const bytes = new Uint8Array(size); let offset = 0;
         for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        const raw = new TextDecoder().decode(bytes);
-        if (raw.length > 16000) fail(413, 'Przesłany formularz jest za duży.');
-        try { body = JSON.parse(raw || '{}'); } catch { fail(400, 'Niepoprawny formularz. Odśwież stronę i spróbuj ponownie.'); }
+        try { body = JSON.parse(new TextDecoder().decode(bytes) || '{}'); } catch { fail(400, 'Niepoprawny formularz. Odśwież stronę i spróbuj ponownie.'); }
         if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Niepoprawny formularz.');
       }
     }
@@ -400,49 +419,39 @@ export class FamilyStore extends DurableObject {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
       const e = text(body.email, 'E-mail', 254, true).toLowerCase();
       if (typeof body.password !== 'string' || body.password.length > 256) fail(400, 'Podaj hasło.');
+      this.rateLimit(`login:${await digest(e)}`, 20, 900);
       const account = this.one('SELECT * FROM accounts WHERE email=?', e);
       const computed = await passwordHash(body.password, account?.salt || 'missing-user-timing-padding');
       if (!account || !constantEqual(computed, account.password_hash)) fail(401, 'Nieprawidłowy e-mail lub hasło.');
       return this.session(account);
     }
-    // Rejestracja: każdy może założyć własną rodzinę i zostaje jej organizatorem.
-    // Dołączenie z zaproszenia: nowe konto albo — gdy e-mail i hasło pasują do istniejącego — kolejna rodzina tego konta.
+    // Rejestracja zakłada rodzinę (zakładający zostaje organizatorem), dołączenie wchodzi do rodziny z zaproszenia.
+    // W obu przypadkach: nowe konto albo — gdy e-mail i hasło pasują do istniejącego — kolejna rodzina tego konta.
     if (method === 'POST' && (path === '/api/register' || path === '/api/join')) {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
-      const input = { name: text(body.name, 'Imię', 60, true), email: email(body.email), password: password(body.password) };
       const register = path === '/api/register';
+      const name = line(body.name, 'Imię', 60, true), mail = email(body.email), pass = password(body.password);
       let family;
       if (register) {
+        if (!this.canRegister()) fail(403, 'Zakładanie nowych rodzin jest tu wyłączone. Poproś bliskich o zaproszenie.');
         this.rateLimit(`register:${ipKey}`, 5, 3600);
         family = await this.newFamily(body.familyName);
       } else {
-        if (typeof body.inviteToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.inviteToken)) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
-        family = this.one('SELECT * FROM family WHERE invite_hash=?', await digest(body.inviteToken));
+        family = this.one('SELECT * FROM family WHERE invite_hash=?', await inviteToken(body.inviteToken));
         if (!family) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
       }
-      const existing = register ? null : this.one('SELECT * FROM accounts WHERE email=?', input.email);
-      const salt = existing?.salt || random(), hash = await passwordHash(input.password, salt);
-      if (existing && !constantEqual(hash, existing.password_hash)) fail(409, 'Masz już konto z tym adresem — wpisz jego hasło albo zaloguj się i otwórz link ponownie.');
-      let account, memberId;
-      // Ponowne sprawdzenie po asynchronicznym KDF, w transakcji.
+      const account = await this.credentials(mail, pass, 'Masz już konto z tym adresem — wpisz jego hasło albo zaloguj się.');
+      let memberId;
       this.ctx.storage.transactionSync(() => {
-        if (existing) {
-          account = this.one('SELECT * FROM accounts WHERE id=?', existing.id);
-          if (!account || account.password_hash !== existing.password_hash) fail(409, 'Dane logowania zmieniły się. Spróbuj ponownie.');
-        } else {
-          if (this.one('SELECT id FROM accounts WHERE email=?', input.email)) fail(409, 'Nie można utworzyć konta z tym adresem. Spróbuj się zalogować.');
-          account = { id: crypto.randomUUID(), email: input.email, salt, password_hash: hash };
-        }
+        this.claim(account);
         if (register) this.insertFamily(family);
         else if (!this.one('SELECT id FROM family WHERE invite_hash=?', family.invite_hash)) fail(404, 'Zaproszenie wygasło. Poproś o nowy link.');
-        if (!existing) this.sql.exec('INSERT INTO accounts(id,email,salt,password_hash) VALUES(?,?,?,?)', account.id, account.email, account.salt, account.password_hash);
-        const already = existing && this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', family.id, account.id);
-        memberId = already ? already.id : this.addMembership(family.id, account.id, input.name, register);
+        const already = this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', family.id, account.id);
+        memberId = already ? already.id : this.addMembership(family.id, account.id, name, register);
       });
       return this.session(account, memberId);
     }
     if (method === 'GET' && /^\/api\/invitation\/[a-f0-9]{64}$/.test(path)) {
-      this.rateLimit(`invite:${ipKey}`, 60, 900);
       const family = this.one('SELECT id,name FROM family WHERE invite_hash=?', await digest(path.split('/').pop()));
       if (!family) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
       const admin = this.one('SELECT name FROM members WHERE family_id=? AND is_admin=1 LIMIT 1', family.id);
@@ -456,22 +465,24 @@ export class FamilyStore extends DurableObject {
       const acct = this.one('SELECT * FROM accounts WHERE email=?', e);
       const pick = acct && this.pickMember(acct.id);
       const m = pick && this.one('SELECT * FROM members WHERE id=?', pick.id);
-      if (m && this.env.RESEND_API_KEY) {
+      if (m && mailOn(this.env)) {
         try {
         this.rateLimit(`forgot-to:${await digest(e)}`, 3, 86400);
         await sendMail(this.env, acct.email, {
           subject: 'Nowe hasło do listów do Mikołaja', heading: `Cześć, ${m.name}`,
           lines: ['Ktoś poprosił o nowe hasło do Twojego konta. Jeśli to Ty — kliknij poniżej i ustaw nowe.'],
-          button: { label: 'Ustaw nowe hasło', url: `${url.origin}/#link=${await this.newLink(m)}` },
-          foot: 'Link działa raz, przez 3 dni. Jeśli to nie Ty, po prostu zignoruj tę wiadomość.',
+          button: { label: 'Ustaw nowe hasło', url: `${this.base(url)}/#link=${await this.newLink(m)}` },
+          foot: 'Link działa raz, przez 3 dni. Jeśli to nie Ty, po prostu zignoruj tę wiadomość.', base: this.base(url),
         });
         } catch (error) { if (!(error instanceof AppError)) throw error; }
       }
       return json({ ok: true });
     }
-    // Wywołanie z harmonogramu (Worker blokuje /api/internal/ z zewnątrz).
-    if (method === 'POST' && path === '/api/internal/remind') return json(await this.remind());
-    if (method === 'POST' && path === '/api/internal/digest') return json(await this.digest());
+    // Link z maila: koniec przypomnień na ten adres (hasło i zaproszenia dalej dochodzą).
+    if (method === 'POST' && path === '/api/mails/off') {
+      if (typeof body.token === 'string' && /^[a-f0-9]{64}$/.test(body.token)) this.sql.exec('UPDATE accounts SET mails=0 WHERE mail_token=?', body.token);
+      return json({ ok: true });
+    }
 
     // Jednorazowy link: nowe hasło albo przejęcie listy prowadzonej przez kogoś innego.
     const linkMatch = path.match(/^\/api\/link\/([a-f0-9]{64})$/);
@@ -500,23 +511,12 @@ export class FamilyStore extends DurableObject {
         return this.session(account, member.id);
       }
       // Przejęcie listy: nowe konto albo podpięcie pod istniejące (wtedy hasło musi się zgadzać).
-      const e = email(body.email);
-      const existing = this.one('SELECT * FROM accounts WHERE email=?', e);
-      const salt = existing?.salt || random(), pw = await passwordHash(pass, salt);
-      if (existing && !constantEqual(pw, existing.password_hash)) fail(409, 'Ten adres ma już konto — wpisz jego hasło, a lista dołączy do Twojego konta.');
-      let account;
+      const account = await this.credentials(email(body.email), pass, 'Ten adres ma już konto — wpisz jego hasło, a lista dołączy do Twojego konta.');
       this.ctx.storage.transactionSync(() => {
         member = find();
         if (!member || !member.managed_by) fail(404, 'Ten link wygasł albo został już użyty.');
-        if (existing) {
-          account = this.one('SELECT * FROM accounts WHERE id=?', existing.id);
-          if (!account || account.password_hash !== existing.password_hash) fail(409, 'Dane logowania zmieniły się. Spróbuj ponownie.');
-          if (this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', member.family_id, account.id)) fail(409, 'To konto jest już w tej rodzinie. Poproś organizatora, żeby usunął jedną z list.');
-        } else {
-          if (this.one('SELECT id FROM accounts WHERE email=?', e)) fail(409, 'Ten adres jest już używany.');
-          account = { id: crypto.randomUUID(), email: e, salt, password_hash: pw };
-          this.sql.exec('INSERT INTO accounts(id,email,salt,password_hash) VALUES(?,?,?,?)', account.id, account.email, account.salt, account.password_hash);
-        }
+        this.claim(account);
+        if (this.one('SELECT id FROM members WHERE family_id=? AND account_id=?', member.family_id, account.id)) fail(409, 'To konto jest już w tej rodzinie. Poproś organizatora, żeby usunął jedną z list.');
         this.sql.exec('UPDATE members SET account_id=?,email=?,managed_by=NULL WHERE id=?', account.id, `acct:${member.id}`, member.id);
         this.sql.exec('DELETE FROM links WHERE member_id=?', member.id);
         this.sql.exec('DELETE FROM sessions WHERE member_id=?', member.id);
@@ -527,13 +527,20 @@ export class FamilyStore extends DurableObject {
     // ---------- z logowaniem ----------
     const token = request.headers.get('Cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1) || '';
     const sessionHash = /^[a-f0-9]{64}$/.test(token) ? await digest(token) : '';
-    const me = sessionHash ? this.one('SELECT m.*,s.admin_until,a.email AS login FROM sessions s JOIN members m ON m.id=s.member_id JOIN accounts a ON a.id=m.account_id WHERE s.hash=? AND s.expires>?', sessionHash, now()) : null;
-    if (method === 'GET' && path === '/api/state') return json(me ? { ...this.state(me), mail: Boolean(this.env.RESEND_API_KEY) } : { user: null, mail: Boolean(this.env.RESEND_API_KEY) });
+    const me = this.who(sessionHash);
+    if (method === 'GET' && path === '/api/state') {
+      // Sesja odnawia się przy użyciu — kto zagląda raz na kilka tygodni, nie musi pamiętać hasła.
+      const renew = me && me.expires < now() + SESSION_AGE - 86400;
+      if (renew) this.sql.exec('UPDATE sessions SET expires=? WHERE hash=?', now() + SESSION_AGE, sessionHash);
+      return json(this.state(me), 200, renew ? { 'Set-Cookie': cookie(token) } : {});
+    }
     if (method === 'POST' && path === '/api/logout') {
       this.sql.exec('DELETE FROM sessions WHERE hash=?', sessionHash);
       return json({ ok: true }, 200, { 'Set-Cookie': cookie('', 0) });
     }
     if (!me) fail(401, 'Zaloguj się, aby zobaczyć rodzinne listy.');
+    // Odpowiedź na zapis niesie świeży stan — aplikacja nie musi pytać o niego drugi raz.
+    const done = (extra = {}, status = 200) => json({ ok: true, ...extra, state: this.state(this.who(sessionHash)) }, status);
 
     const member = id => this.one('SELECT * FROM members WHERE id=? AND family_id=?', id, me.family_id) || fail(404, 'Nie znaleziono tej osoby.');
     const god = this.god(me);
@@ -549,23 +556,22 @@ export class FamilyStore extends DurableObject {
       const target = typeof body.memberId === 'string' && this.one('SELECT id FROM members WHERE id=? AND account_id=?', body.memberId, me.account_id);
       if (!target) fail(404, 'Nie należysz do tej rodziny.');
       switchTo(target.id);
-      return json({ ok: true });
+      return done();
     }
     if (method === 'POST' && path === '/api/families') {
       this.rateLimit(`register:${ipKey}`, 5, 3600);
       const family = await this.newFamily(body.familyName);
-      const name = text(body.name ?? me.name, 'Imię', 60, true);
+      const name = line(body.name ?? me.name, 'Imię', 60, true);
       this.ctx.storage.transactionSync(() => {
         this.insertFamily(family);
         switchTo(this.addMembership(family.id, me.account_id, name, true));
       });
-      return json({ ok: true });
+      return done();
     }
     if (method === 'POST' && path === '/api/families/join') {
       this.rateLimit(`auth:${ipKey}`, 30, 900);
-      if (typeof body.inviteToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.inviteToken)) fail(404, 'Zaproszenie jest nieprawidłowe lub wygasło.');
-      const inviteHash = await digest(body.inviteToken);
-      const name = text(body.name ?? me.name, 'Imię', 60, true);
+      const inviteHash = await inviteToken(body.inviteToken);
+      const name = line(body.name ?? me.name, 'Imię', 60, true);
       let already = false;
       this.ctx.storage.transactionSync(() => {
         const family = this.one('SELECT id FROM family WHERE invite_hash=?', inviteHash);
@@ -574,7 +580,7 @@ export class FamilyStore extends DurableObject {
         already = Boolean(existing);
         switchTo(existing ? existing.id : this.addMembership(family.id, me.account_id, name, false));
       });
-      return json({ ok: true, already });
+      return done({ already });
     }
     // Opuszczenie aktywnej rodziny. Nie dotyczy jedynej rodziny (to byłoby usunięcie konta)
     // ani organizatora — ten najpierw przekazuje rolę, żeby rodzina nie została bez opiekuna.
@@ -589,49 +595,56 @@ export class FamilyStore extends DurableObject {
         const heir = this.one('SELECT id FROM members WHERE family_id=? AND id<>? AND managed_by IS NULL ORDER BY is_admin DESC, rowid LIMIT 1', me.family_id, me.id);
         this.removeMember(self, heir?.id ?? null);
       });
-      return json({ ok: true, family: next.name });
+      return done({ family: next.name });
     }
 
-    if (method === 'GET' && path === '/api/admin') { adminOnly(); return json(this.admin(me, url.origin)); }
+    if (method === 'GET' && path === '/api/admin') { adminOnly(); return json(this.admin(me, this.base(url))); }
+    if (method === 'PATCH' && path === '/api/account') {
+      if (typeof body.mails !== 'boolean') fail(400, 'Niepoprawne ustawienie.');
+      this.sql.exec('UPDATE accounts SET mails=? WHERE id=?', body.mails ? 1 : 0, me.account_id);
+      return done();
+    }
     // Tryb organizatora: włączany ręcznie, tylko w tej sesji, wyłącza się sam po godzinie.
     if (method === 'PATCH' && path === '/api/session') {
       adminOnly();
       this.sql.exec('UPDATE sessions SET admin_until=? WHERE hash=?', body.adminMode === true ? now() + 3600 : 0, sessionHash);
-      return json({ ok: true });
+      return done();
     }
     if (method === 'POST' && path === '/api/invite/email') {
       adminOnly();
-      this.rateLimit(`invite-mail:${me.id}`, 30, 86400);
+      // Limit na konto (nie na rodzinę) i wspólny dzienny — żeby nikt nie rozsyłał stąd cudzych treści.
+      this.rateLimit(`invite-mail:${me.account_id}`, 20, 86400);
+      this.rateLimit('invite-mail:all', 60, 86400);
       const to = email(body.email);
       const family = this.one('SELECT name,invite FROM family WHERE id=?', me.family_id);
       await sendMail(this.env, to, {
-        subject: `${me.name} zaprasza Cię do listów do Mikołaja`, heading: 'Zaproszenie',
+        subject: 'Zaproszenie do rodzinnych listów do Mikołaja', heading: 'Zaproszenie',
         lines: [`${me.name} zaprasza Cię do rodziny ${family.name} — do wspólnych list do Mikołaja.`, 'Każdy pisze list i życzenia, a bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego. Niespodzianka zostaje niespodzianką.'],
-        button: { label: 'Dołączam', url: `${url.origin}/#invite=${family.invite}` },
-        foot: 'Jeśli nie znasz nadawcy, zignoruj tę wiadomość.',
+        button: { label: 'Dołączam', url: `${this.base(url)}/#invite=${family.invite}` },
+        foot: 'Jeśli nie znasz nadawcy, zignoruj tę wiadomość.', base: this.base(url),
       });
-      return json({ ok: true });
+      return done();
     }
     if (method === 'PATCH' && path === '/api/family') {
       adminOnly();
-      this.sql.exec('UPDATE family SET name=? WHERE id=?', text(body.name, 'Nazwa rodziny', 80, true), me.family_id);
-      return json({ ok: true });
+      this.sql.exec('UPDATE family SET name=? WHERE id=?', line(body.name, 'Nazwa rodziny', 80, true), me.family_id);
+      return done();
     }
     if (method === 'POST' && path === '/api/invite') {
       adminOnly();
       const invite = random();
       this.sql.exec('UPDATE family SET invite=?,invite_hash=? WHERE id=?', invite, await digest(invite), me.family_id);
-      return json({ ok: true });
+      return done();
     }
 
     // osoby
     if (method === 'POST' && path === '/api/members') {
       if (!me.can_add && !me.is_admin) fail(403, 'Nie możesz dodawać osób. Poproś organizatora.');
-      const name = text(body.name, 'Imię', 60, true), id = crypto.randomUUID();
+      const name = line(body.name, 'Imię', 60, true), id = crypto.randomUUID();
       if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', me.family_id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
       // Osoba bez konta: adres zastępczy i puste hasło — nie da się na nią zalogować.
       this.sql.exec('INSERT INTO members(id,family_id,name,email,salt,password_hash,managed_by) VALUES(?,?,?,?,?,?,?)', id, me.family_id, name, `managed:${id}`, '', '', me.id);
-      return json({ id }, 201);
+      return done({ id }, 201);
     }
     const memberMatch = path.match(/^\/api\/members\/([^/]+)(\/letter|\/link)?$/);
     if (memberMatch) {
@@ -639,12 +652,12 @@ export class FamilyStore extends DurableObject {
       if (memberMatch[2] === '/letter' && method === 'PATCH') {
         if (!canEdit(target)) fail(403, 'Możesz zmieniać tylko swój list i listy osób, które prowadzisz.');
         this.sql.exec('UPDATE members SET letter=? WHERE id=?', text(body.letter, 'List', 4000), target.id);
-        return json({ ok: true });
+        return done();
       }
       if (memberMatch[2] === '/link' && method === 'POST') {
         if (!me.is_admin && target.managed_by !== me.id) fail(403, 'Brak uprawnień.');
         if (!target.managed_by) fail(403, 'Osoba z własnym kontem musi użyć odzyskiwania hasła przez e-mail.');
-        return this.link(target, url.origin);
+        return json({ url: `${this.base(url)}/#link=${await this.newLink(target)}` });
       }
       if (!memberMatch[2] && method === 'PATCH') {
         adminOnly();
@@ -653,25 +666,23 @@ export class FamilyStore extends DurableObject {
         if (body.managedBy !== undefined) {
           if (!target.managed_by) fail(400, 'Ta osoba ma własne konto.');
           const manager = member(body.managedBy);
-          if (manager.managed_by) fail(400, 'Opiekun musi mieć własne konto.');
+          if (manager.managed_by) fail(400, 'Listę może prowadzić tylko osoba z własnym kontem.');
           this.sql.exec('UPDATE members SET managed_by=? WHERE id=?', manager.id, target.id);
           this.sql.exec('DELETE FROM links WHERE member_id=?', target.id);
         }
         if (body.admin === true) {
           if (target.managed_by) fail(400, 'Organizator musi mieć własne konto.');
-          {
-            this.sql.exec('UPDATE members SET is_admin=0 WHERE family_id=?', me.family_id);
-            this.sql.exec('UPDATE members SET is_admin=1 WHERE id=?', target.id);
-          }
+          this.sql.exec('UPDATE members SET is_admin=0 WHERE family_id=?', me.family_id);
+          this.sql.exec('UPDATE members SET is_admin=1 WHERE id=?', target.id);
         }
         });
-        return json({ ok: true });
+        return done();
       }
       if (!memberMatch[2] && method === 'DELETE') {
         if (target.id === me.id) fail(400, 'Nie możesz usunąć siebie.');
         if (!me.is_admin && target.managed_by !== me.id) fail(403, 'Brak uprawnień.');
         this.ctx.storage.transactionSync(() => this.removeMember(target, me.id));
-        return json({ ok: true });
+        return done();
       }
     }
 
@@ -682,7 +693,7 @@ export class FamilyStore extends DurableObject {
       const w = wishFields(body), id = crypto.randomUUID();
       if (this.one('SELECT COUNT(*) AS n FROM wishes WHERE owner_id=?', owner.id).n >= 200) fail(409, 'Lista może mieć najwyżej 200 życzeń.');
       this.sql.exec('INSERT INTO wishes(id,owner_id,title,note,url,tier,created_at) VALUES(?,?,?,?,?,?,?)', id, owner.id, w.title, w.note, w.url, w.tier, new Date().toISOString());
-      return json({ id }, 201);
+      return done({ id }, 201);
     }
     const match = path.match(/^\/api\/wishes\/([^/]+)(\/reserve)?$/);
     if (match) {
@@ -693,17 +704,17 @@ export class FamilyStore extends DurableObject {
         if (method === 'PATCH') {
           const u = wishFields(body);
           this.sql.exec('UPDATE wishes SET title=?,note=?,url=?,tier=? WHERE id=?', u.title, u.note, u.url, u.tier, w.id);
-          return json({ ok: true });
+          return done();
         }
         if (method === 'DELETE') {
           this.ctx.storage.transactionSync(() => {
             this.sql.exec('DELETE FROM reservations WHERE wish_id=?', w.id);
             this.sql.exec('DELETE FROM wishes WHERE id=?', w.id);
           });
-          return json({ ok: true });
+          return done();
         }
       } else {
-        if (w.owner_id === me.id) fail(403, 'Nie można rezerwować własnych życzeń.');
+        if (w.owner_id === me.id) fail(403, 'Nie możesz kupować prezentów z własnej listy.');
         const reservation = this.one('SELECT * FROM reservations WHERE wish_id=?', w.id);
         if (method === 'POST') {
           // Organizator w swoim trybie może przypisać prezent komuś innemu (albo przepisać rezerwację).
@@ -714,19 +725,19 @@ export class FamilyStore extends DurableObject {
             if (buyer.managed_by) fail(400, 'Prezenty kupują osoby z własnym kontem.');
             if (buyer.id === w.owner_id) fail(400, 'Nikt nie kupuje prezentu sam sobie.');
           }
-          if (reservation && !god) fail(409, 'Ktoś już wybrał ten prezent. Wybierz inny.');
+          if (reservation && !god) fail(409, 'Ktoś już to kupuje. Wybierz inny prezent.');
           const snap = JSON.stringify({ title: w.title, note: w.note, url: w.url, tier: w.tier });
           // Odczyt i zapis bez await pomiędzy — atomowe w obrębie Durable Object.
           if (reservation) this.sql.exec('UPDATE reservations SET purchased=CASE WHEN member_id=? THEN purchased ELSE 0 END,member_id=?,snapshot=?,reserved_at=? WHERE wish_id=?', buyer.id, buyer.id, snap, now(), w.id);
           else this.sql.exec('INSERT INTO reservations(wish_id,member_id,purchased,snapshot,reserved_at) VALUES(?,?,0,?,?)', w.id, buyer.id, snap, now());
-          return json({ ok: true });
+          return done();
         }
-        if (!reservation || (reservation.member_id !== me.id && !god)) fail(403, 'Możesz zmieniać tylko swoje rezerwacje.');
-        if (method === 'DELETE') { this.sql.exec('DELETE FROM reservations WHERE wish_id=?', w.id); return json({ ok: true }); }
+        if (!reservation || (reservation.member_id !== me.id && !god)) fail(403, 'Możesz zmieniać tylko prezenty, które kupujesz Ty.');
+        if (method === 'DELETE') { this.sql.exec('DELETE FROM reservations WHERE wish_id=?', w.id); return done(); }
         if (method === 'PATCH') {
           if (typeof body.purchased !== 'boolean') fail(400, 'Niepoprawny status prezentu.');
           this.sql.exec('UPDATE reservations SET purchased=? WHERE wish_id=?', body.purchased ? 1 : 0, w.id);
-          return json({ ok: true });
+          return done();
         }
       }
     }
@@ -734,74 +745,55 @@ export class FamilyStore extends DurableObject {
   }
 }
 
+const SEO = {
+  '/robots.txt': origin => [`User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: ${origin}/sitemap.xml\n`, 'text/plain; charset=utf-8'],
+  '/sitemap.xml': origin => [`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${origin}/</loc></url></urlset>\n`, 'application/xml; charset=utf-8'],
+};
+// index.html z wbudowanym CSS — tekst maluje się bez czekania na osobny arkusz.
+async function page(request, env, origin) {
+  const read = async path => { const r = await env.ASSETS.fetch(new URL(path, request.url)); return r.ok ? r.text() : fail(500, 'Brak plików aplikacji.'); };
+  const [html, css] = await Promise.all([read('/'), read('/app.css')]);
+  // Nonce na odpowiedź — działa też skrypt, który Cloudflare potrafi wstrzyknąć, bez 'unsafe-inline'.
+  const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+  let body = html.replaceAll('{{ORIGIN}}', origin).replaceAll('<script', `<script nonce="${nonce}"`)
+    .replace('<link rel="stylesheet" href="/app.css">', () => `<style nonce="${nonce}">${css}</style>`);
+  // Zalogowany nie powinien mignąć stroną startową, która leży gotowa w HTML.
+  if (request.headers.get('Cookie')?.split(';').some(v => v.trim().startsWith(`${COOKIE}=`))) body = body.replace('<main id="app" class="pre">', '<main id="app" class="pre" hidden>');
+  const csp = SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`).replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`);
+  return new Response(request.method === 'HEAD' ? null : body, { headers: { ...SECURITY, 'Content-Security-Policy': csp, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // Stary adres — przenosimy na nowy (fragment #invite=… przeglądarka zachowuje sama).
-    if (url.hostname === 'mikolaj.walasek.xyz' && url.pathname !== '/version.json') {
-      return Response.redirect(`https://list.do.mikolaja.pl${url.pathname}${url.search}`, url.pathname.startsWith('/api/') ? 308 : 301);
+    // Jeden adres: gdy APP_URL jest ustawiony, inne domeny przenoszą na niego (fragment #invite=… przeglądarka zachowuje sama).
+    const home = env.APP_URL ? new URL(env.APP_URL) : url;
+    if (url.host !== home.host && !['localhost', '127.0.0.1'].includes(url.hostname)) {
+      return Response.redirect(`${home.origin}${url.pathname}${url.search}`, url.pathname.startsWith('/api/') ? 308 : 301);
     }
-    if (url.pathname === '/version.json') {
-      if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Niedozwolona metoda.' }, 405);
-      const response = json({ revision: env.DEPLOY_REVISION || 'manual', branch: env.DEPLOY_BRANCH || null });
-      return request.method === 'HEAD' ? new Response(null, { headers: response.headers }) : response;
-    }
-    if (url.pathname.startsWith('/api/internal/')) return json({ error: 'Nie znaleziono tej strony.' }, 404);
-    if (url.pathname.startsWith('/api/')) return env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request);
+    if (url.pathname.startsWith('/api/')) return env.FAMILY.getByName('family-v1').fetch(request);
     if (!['GET', 'HEAD'].includes(request.method)) return json({ error: 'Niedozwolona metoda.' }, 405);
-    const assets = {
-      '/': [html, 'text/html; charset=utf-8'],
-      '/app.css': [css, 'text/css; charset=utf-8'],
-      '/app.js': [app, 'application/javascript; charset=utf-8'],
-      '/site.webmanifest': [manifest, 'application/manifest+json'],
-      '/favicon.ico': [faviconIco, 'image/x-icon'],
-      '/favicon-16x16.png': [favicon16, 'image/png'],
-      '/favicon-32x32.png': [favicon32, 'image/png'],
-      '/favicon-48x48.png': [favicon48, 'image/png'],
-      '/favicon-96x96.png': [favicon96, 'image/png'],
-      '/apple-touch-icon.png': [touch, 'image/png'],
-      '/apple-touch-icon-precomposed.png': [touch, 'image/png'],
-      '/apple-touch-icon-120x120.png': [touch120, 'image/png'],
-      '/apple-touch-icon-152x152.png': [touch152, 'image/png'],
-      '/apple-touch-icon-167x167.png': [touch167, 'image/png'],
-      '/icon-192x192.png': [icon192, 'image/png'],
-      '/icon-512x512.png': [icon512, 'image/png'],
-      '/icon-maskable-512x512.png': [iconMaskable, 'image/png'],
-      '/mark.webp': [mark, 'image/webp'],
-      '/og.png': [ogImage, 'image/png'],
-      '/inter-400.woff2': [fontInter400, 'font/woff2'],
-      '/inter-500.woff2': [fontInter500, 'font/woff2'],
-      '/inter-400-ext.woff2': [fontInter400Ext, 'font/woff2'],
-      '/inter-500-ext.woff2': [fontInter500Ext, 'font/woff2'],
-      '/newsreader-ext.woff2': [fontNewsreaderExt, 'font/woff2'],
-      '/newsreader-italic-ext.woff2': [fontNewsreaderItalicExt, 'font/woff2'],
-      '/newsreader.woff2': [fontNewsreader, 'font/woff2'],
-      '/newsreader-italic.woff2': [fontNewsreaderItalic, 'font/woff2'],
-      '/robots.txt': [ROBOTS, 'text/plain; charset=utf-8'],
-      '/sitemap.xml': [SITEMAP, 'application/xml; charset=utf-8'],
-    };
-    const asset = assets[url.pathname];
-    if (!asset) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
-    // ikony i fonty leżą w pamięci przeglądarki rok (nowa wersja pliku = nowa nazwa); kod i HTML zawsze sprawdzane na nowo
-    const lasting = asset[1].startsWith('image/') || asset[1].startsWith('font/');
-    const headers = { ...SECURITY, 'Content-Type': asset[1], 'Cache-Control': lasting ? 'public, max-age=31536000, immutable' : 'no-cache' };
-    if (asset[0] === html && request.method === 'GET') {
-      // Nonce na odpowiedź — Cloudflare może wstrzyknąć swój skrypt bez 'unsafe-inline'.
-      const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-      let body = html.replaceAll('<script', `<script nonce="${nonce}"`)
-        // CSS wbudowany w HTML — tekst maluje się bez czekania na osobne pobranie arkusza
-        .replace('<link rel="stylesheet" href="/app.css">', () => `<style nonce="${nonce}">${css}</style>`);
-      // Zalogowany nie powinien mignąć stroną startową, która leży gotowa w HTML.
-      const session = request.headers.get('Cookie')?.split(';').some(v => v.trim().startsWith(`${COOKIE}=`));
-      if (session) body = body.replace('<main id="app" class="pre">', '<main id="app" class="pre" hidden>');
-      return new Response(body, { headers: { ...headers, 'Content-Security-Policy': SECURITY['Content-Security-Policy'].replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`).replace("style-src 'self'", `style-src 'self' 'nonce-${nonce}'`) } });
+    if (url.pathname === '/version.json') return json({ revision: env.DEPLOY_REVISION || 'manual' });
+    try {
+      if (url.pathname === '/') return await page(request, env, home.origin);
+    } catch { return new Response('Nie udało się wczytać aplikacji.', { status: 500, headers: SECURITY }); }
+    if (SEO[url.pathname]) {
+      const [body, type] = SEO[url.pathname](home.origin);
+      return new Response(body, { headers: { ...SECURITY, 'Content-Type': type, 'Cache-Control': 'no-cache' } });
     }
-    return new Response(request.method === 'HEAD' ? null : asset[0], { headers });
+    // Pliki z public/ podaje Cloudflare (ETag, kompresja); tu dochodzą tylko nagłówki.
+    const asset = await env.ASSETS.fetch(request);
+    if (asset.status === 404) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
+    const response = new Response(asset.body, asset);
+    for (const [name, value] of Object.entries(SECURITY)) response.headers.set(name, value);
+    // ikony i fonty leżą w pamięci przeglądarki rok (nowa wersja pliku = nowa nazwa); kod jest zawsze sprawdzany na nowo
+    const lasting = /^(image|font)\//.test(response.headers.get('Content-Type') || '');
+    response.headers.set('Cache-Control', lasting ? 'public, max-age=31536000, immutable' : 'no-cache');
+    return response;
   },
   // Harmonogram: 3 grudnia — przypomnienie przed Wigilią; codziennie w południe — nowe życzenia.
   async scheduled(controller, env, ctx) {
-    const job = controller.cron === '0 9 3 12 *' ? 'remind' : 'digest';
-    const request = new Request(`https://internal.invalid/api/internal/${job}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    ctx.waitUntil(env.FAMILY.getByName(env.STORE_NAME || 'family-v1').fetch(request));
+    const store = env.FAMILY.getByName('family-v1');
+    ctx.waitUntil(controller.cron === '0 9 3 12 *' ? store.remind() : store.digest());
   },
 };
