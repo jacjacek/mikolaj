@@ -180,6 +180,10 @@ button[disabled] { opacity: .5; cursor: default; }
 .in:focus { outline: none; background: color-mix(in srgb, var(--field) 70%, var(--faint) 30%); }
 textarea.in { min-height: 90px; resize: vertical; line-height: 1.45; }
 textarea.in.big { min-height: 220px; font: 400 1.1875rem/1.55 var(--serif); }
+/* pisany list: niższe pole, rośnie z treścią — pod nim widać jeszcze „Dodaj życzenie” */
+.letter-form textarea.in.big { min-height: 132px; max-height: 60vh; resize: none; }
+.hint { color: var(--faint); font-size: 0.875rem; margin: 0; max-width: 34em; }
+.saved { color: var(--faint); font-size: 0.875rem; margin: -4px 0 0; min-height: 1.4em; }
 select.in { appearance: none; -webkit-appearance: none; cursor: pointer; padding-right: 40px; background-repeat: no-repeat; background-position: right 16px center; background-image: var(--chev); }
 select.in:invalid { color: var(--faint); }
 

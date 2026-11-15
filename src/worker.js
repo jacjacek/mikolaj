@@ -102,7 +102,8 @@ export class FamilyStore extends DurableObject {
     // Aktualny kształt bazy. Konto (e-mail + hasło) jest osobno od członkostwa — jedna osoba może być w wielu
     // rodzinach, w każdej z własnym listem, życzeniami i rolą; sesja wskazuje aktywne członkostwo.
     // Zaszłości zostawione celowo (dane nigdy nie są usuwane): members.email/salt/password_hash to zaślepki
-    // sprzed tabeli accounts, wishes.price — cena sprzed przedziałów.
+    // sprzed tabeli accounts, wishes.price — cena sprzed przedziałów,
+    // members.can_add — dawne uprawnienie do dodawania osób (dziś może każdy).
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS family (id TEXT PRIMARY KEY, name TEXT NOT NULL, invite TEXT NOT NULL, invite_hash TEXT NOT NULL);
@@ -360,13 +361,13 @@ export class FamilyStore extends DurableObject {
       return wish;
     });
     const families = this.memberships(me.account_id).map(m => ({ memberId: m.id, name: m.family, isAdmin: Boolean(m.is_admin) }));
-    return { user: { id: me.id, name: me.name, email: me.login, isAdmin: Boolean(me.is_admin), canAdd: Boolean(me.can_add || me.is_admin), adminUntil: god ? me.admin_until : 0, mails: Boolean(me.mails) }, family, families, members, wishes, ...flags };
+    return { user: { id: me.id, name: me.name, email: me.login, isAdmin: Boolean(me.is_admin), adminUntil: god ? me.admin_until : 0, mails: Boolean(me.mails) }, family, families, members, wishes, ...flags };
   }
   god(me) { return Boolean(me.is_admin) && me.admin_until > now(); }
   // Przegląd organizatora — bez rezerwacji na jego własnej liście.
   admin(me, origin) {
-    const members = this.rows('SELECT m.id,m.name,a.email AS login,m.is_admin,m.can_add,m.managed_by FROM members m LEFT JOIN accounts a ON a.id=m.account_id WHERE m.family_id=? ORDER BY m.name COLLATE NOCASE', me.family_id)
-      .map(m => ({ id: m.id, name: m.name, email: m.managed_by ? null : m.login, isAdmin: Boolean(m.is_admin), canAdd: Boolean(m.can_add), managedBy: m.managed_by }));
+    const members = this.rows('SELECT m.id,m.name,a.email AS login,m.is_admin,m.managed_by FROM members m LEFT JOIN accounts a ON a.id=m.account_id WHERE m.family_id=? ORDER BY m.name COLLATE NOCASE', me.family_id)
+      .map(m => ({ id: m.id, name: m.name, email: m.managed_by ? null : m.login, isAdmin: Boolean(m.is_admin), managedBy: m.managed_by }));
     // Kto co kupuje — tylko w tymczasowym trybie organizatora.
     const all = !this.god(me) ? [] : this.rows(`SELECT w.id AS wishId,w.title,w.tier,w.owner_id AS ownerId,r.member_id AS buyerId,r.purchased
       FROM reservations r JOIN wishes w ON w.id=r.wish_id JOIN members m ON m.id=w.owner_id WHERE m.family_id=? ORDER BY w.created_at`, me.family_id);
@@ -620,7 +621,8 @@ export class FamilyStore extends DurableObject {
       await sendMail(this.env, to, {
         subject: 'Zaproszenie do rodzinnych listów do Mikołaja', heading: 'Zaproszenie',
         lines: [`${me.name} zaprasza Cię do rodziny ${family.name} — do wspólnych list do Mikołaja.`, 'Każdy pisze list i życzenia, a bliscy wybierają prezenty tak, żeby nikt nie kupił tego samego. Niespodzianka zostaje niespodzianką.'],
-        button: { label: 'Dołączam', url: `${this.base(url)}/#invite=${family.invite}` },
+        // adres w linku wypełnia formularz dołączenia (zostaje we fragmencie — nie trafia do serwera)
+        button: { label: 'Dołączam', url: `${this.base(url)}/#invite=${family.invite}&email=${encodeURIComponent(to)}` },
         foot: 'Jeśli nie znasz nadawcy, zignoruj tę wiadomość.', base: this.base(url),
       });
       return done();
@@ -639,7 +641,7 @@ export class FamilyStore extends DurableObject {
 
     // osoby
     if (method === 'POST' && path === '/api/members') {
-      if (!me.can_add && !me.is_admin) fail(403, 'Nie możesz dodawać osób. Poproś organizatora.');
+      // Każdy może dodać osobę, za którą wpisuje list — dziecko, babcię; prowadzi ją wtedy sam.
       const name = line(body.name, 'Imię', 60, true), id = crypto.randomUUID();
       if (this.one('SELECT COUNT(*) AS n FROM members WHERE family_id=?', me.family_id).n >= 100) fail(409, 'Osiągnięto limit członków rodziny.');
       // Osoba bez konta: adres zastępczy i puste hasło — nie da się na nią zalogować.
@@ -662,7 +664,6 @@ export class FamilyStore extends DurableObject {
       if (!memberMatch[2] && method === 'PATCH') {
         adminOnly();
         this.ctx.storage.transactionSync(() => {
-        if (typeof body.canAdd === 'boolean') this.sql.exec('UPDATE members SET can_add=? WHERE id=?', body.canAdd ? 1 : 0, target.id);
         if (body.managedBy !== undefined) {
           if (!target.managed_by) fail(400, 'Ta osoba ma własne konto.');
           const manager = member(body.managedBy);

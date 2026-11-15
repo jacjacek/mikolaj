@@ -96,8 +96,17 @@ await check('Short passwords rejected', async () => {
 });
 await check('Invalid member mutation is atomic', async () => {
   const f=fixture(),a=await f.register('A'),b=await f.join(a,'B');
-  assert.equal((await f.call(`members/${b.id}`,'PATCH',{canAdd:true,managedBy:a.id},a.cookie)).status,400);
-  assert.equal(f.db.prepare('SELECT can_add FROM members WHERE id=?').get(b.id).can_add,0);
+  const kid=(await f.call('members','POST',{name:'Kid'},a.cookie)).body.id;
+  // zmiana opiekuna przechodzi, rola organizatora dla osoby bez konta nie — całość się wycofuje
+  assert.equal((await f.call(`members/${kid}`,'PATCH',{managedBy:b.id,admin:true},a.cookie)).status,400);
+  assert.equal(f.db.prepare('SELECT managed_by FROM members WHERE id=?').get(kid).managed_by,a.id);
+});
+await check('Any member can add a person they write for', async () => {
+  const f=fixture(),a=await f.register('A'),b=await f.join(a,'B');
+  const r=await f.call('members','POST',{name:'Babcia'},b.cookie);
+  assert.equal(r.status,201);
+  assert.equal(r.body.state.members.find(m=>m.id===r.body.id).managedBy,b.id);
+  assert.equal((await f.call(`members/${r.body.id}/letter`,'PATCH',{letter:'Lubię kawę'},b.cookie)).status,200);
 });
 await check('Reassignment resets purchase', async () => {
   const f=fixture(),a=await f.register('A'),b=await f.join(a,'B'),c=await f.join(a,'C'),w=await f.addWish(b);

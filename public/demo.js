@@ -55,7 +55,7 @@ export function createDemo() {
     const [a, id, sub] = path.split('/');
     if (path === 'state') return out({
       family: { name: D.familyName || 'Nowakowie' },
-      user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, canAdd: me.canAdd || me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0, mails: true },
+      user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0, mails: true },
       mail: false, register: true,
       members: D.members.map(({ id, name, letter, managedBy }) => ({ id, name, letter, managedBy })),
       wishes: D.wishes.map(w => {

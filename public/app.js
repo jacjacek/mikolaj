@@ -51,7 +51,7 @@ const secKey = (kind, owner) => owner === me().id ? `s:${kind}` : `s:${kind}:${o
 /* ===================== API ===================== */
 async function api(path, method = 'GET', body) {
   if (S.demo) return demoApi(path, method, body);
-  const init = { method, credentials: 'same-origin', headers: {} };
+  const init = { method, credentials: 'same-origin', headers: {}, keepalive: method !== 'GET' };
   if (method !== 'GET' && method !== 'DELETE') { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body || {}); }
   let res, data = {};
   try { res = await fetch('/api/' + path, init); data = await res.json(); }
@@ -71,13 +71,13 @@ async function refresh() {
 }
 // Jedna akcja naraz; kliknięty przycisk przygasa, dopóki serwer nie odpowie.
 let busy = false, pressed = null;
-async function act(fn, msg, undo) {
+async function act(fn, msg) {
   if (busy) return;
   busy = true;
   const el = pressed;
   el?.classList.add('wait');
-  try { await fn(); await refresh(); render(); if (msg) toast(msg, undo); }
-  catch (e) { S.fresh = null; toast(e.message, null, true); }
+  try { await flushSave(); await fn(); await refresh(); render(); if (msg) toast(msg); }
+  catch (e) { S.fresh = null; toast(e.message, true); }
   finally { busy = false; el?.classList.remove('wait'); }
 }
 async function copy(url, msg) {
@@ -85,11 +85,70 @@ async function copy(url, msg) {
   catch { window.prompt('Skopiuj ten link:', url); }
 }
 
+/* ===================== AUTOZAPIS =====================
+   List i życzenia zapisują się same chwilę po pisaniu — bez przerysowania, żeby nie zgubić kursora.
+   Zapisy idą po kolei; każdy niesie wartości z chwili, w której go zaplanowano. */
+let saveTimer = null, pending = null, saving = Promise.resolve(), saveError = '';
+const saveStatus = msg => { const el = $('.saved'); if (el) el.textContent = msg; };
+function scheduleSave(job, delay = 800) {
+  clearTimeout(saveTimer);
+  pending = job;
+  saveTimer = setTimeout(flushSave, delay);
+}
+function flushSave() {
+  clearTimeout(saveTimer);
+  const job = pending; pending = null;
+  if (job) saving = saving.then(async () => {
+    saveError = '';
+    saveStatus('Zapisywanie…');
+    try { await job(); S.data = S.fresh || await api('state'); S.fresh = null; saveStatus('Zapisano'); }
+    catch (e) { S.fresh = null; saveError = e.message; saveStatus(e.message); }
+    // formularz już zamknięty (np. przejście na inną zakładkę) — pokaż zapisany stan
+    if (!pending && S.data?.user && !$('.wish-form, .letter-form')) render();
+  });
+  return saving;
+}
+// najpierw dokończ zapis, potem przerysuj — żeby nie pokazać na chwilę starej treści
+async function settle(fn) { await flushSave(); if (fn() !== false) render(); }
+// pola formularza życzenia; null, gdy jeszcze nie ma czego zapisać
+function wishValues(form) {
+  const v = name => form.querySelector('#f-' + name).value.trim();
+  const f = { title: v('title'), note: v('note'), url: v('url'), tier: v('tier') };
+  if (!f.title) { saveStatus(form.dataset.id ? 'Wpisz, co chcesz dostać — wtedy zapiszemy.' : ''); return null; }
+  if (!f.tier) { saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return null; }
+  if (f.url && !/^[a-z][a-z0-9+.-]*:/i.test(f.url)) f.url = 'https://' + f.url;  // „allegro.pl/…” też działa
+  return f;
+}
+// nowe życzenie powstaje przy pierwszym zapisie, kolejne zapisy już je tylko zmieniają
+function queueWish(form) {
+  const f = wishValues(form);
+  if (!f) { clearTimeout(saveTimer); pending = null; return; }
+  scheduleSave(async () => {
+    if (form.dataset.id) return api(`wishes/${form.dataset.id}`, 'PATCH', f);
+    const { id } = await api('wishes', 'POST', { ...f, ownerId: form.dataset.owner });
+    form.dataset.id = id; S.adding = null; S.editWish = id;
+    const del = form.querySelector('[data-act="delete-wish"]');
+    if (del) { del.dataset.id = id; del.hidden = false; }
+  });
+}
+const grow = t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 2 + 'px'; };
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'f-letter') {
+    const owner = t.dataset.owner, letter = t.value.trim();
+    grow(t);
+    scheduleSave(() => api(`members/${owner}/letter`, 'PATCH', { letter }));
+  } else if (t.closest('.wish-form')) queueWish(t.closest('.wish-form'));
+});
+// wyjście z pola zapisuje od razu
+document.addEventListener('focusout', e => { if (pending && e.target.closest?.('.wish-form, .letter-form')) flushSave(); });
+addEventListener('pagehide', flushSave);
+
 /* ===================== DEMO =====================
    Przykładowa rodzina żyje w demo.js — pobierana dopiero po kliknięciu „Zobacz przykład”. */
 let demoApi = null;
 async function startDemo() {
-  try { demoApi = (await import('./demo.js')).createDemo(); } catch { return toast('Brak połączenia. Spróbuj ponownie.', null, true); }
+  try { demoApi = (await import('./demo.js')).createDemo(); } catch { return toast('Brak połączenia. Spróbuj ponownie.', true); }
   S.demo = true; S.open.clear();
   act(async () => { S.screen = 'lists'; history.replaceState(null, '', '#/'); window.scrollTo(0, 0); }, 'Przykładowa rodzina — patrzysz jako Ania');
 }
@@ -189,7 +248,8 @@ function vLists() {
           </div>` : ''}
           ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
         ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
-        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień list i życzenia</button></div>` : ''}
+        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień list i życzenia</button></div>`
+          : god() ? `<div class="actions mt"><button class="a line" data-act="edit-person" data-id="${p.id}">Zmień list i życzenia</button></div>` : ''}
         <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">Zwiń</button></p>`;
       return fold('p:' + p.id, 'person', head, body);
     }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
@@ -199,7 +259,7 @@ function vLists() {
 }
 
 function wishForm(w, isNew) {
-  return `<div class="form">
+  return `<div class="form wish-form" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">
     ${field('Co chcesz dostać?', `<input class="in" id="f-title" value="${esc(w.title)}" maxlength="160">`)}
     ${field('Wskazówki — rozmiar, kolor, marka', `<textarea class="in" id="f-note" maxlength="1500">${esc(w.note)}</textarea>`)}
     ${field('Ile może kosztować?', `<select class="in" id="f-tier" required>
@@ -208,10 +268,10 @@ function wishForm(w, isNew) {
     </select>`)}
     ${field('Link do sklepu — jeśli masz', `<input class="in" id="f-url" value="${esc(w.url)}" placeholder="https://" maxlength="2000" inputmode="url">`)}
     <div class="actions">
-      <button class="a solid" data-act="save-wish" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">${isNew ? 'Dodaj' : 'Zapisz'}</button>
-      <button class="a quiet" data-act="close-edit">Anuluj</button>
-      ${isNew ? '' : `<button class="a quiet push" data-act="delete-wish" data-id="${w.id}">Usuń</button>`}
+      <button class="a solid" data-act="done-wish">Gotowe</button>
+      <button class="a line push" data-act="delete-wish" data-id="${isNew ? '' : w.id}" ${isNew ? 'hidden' : ''}>Usuń</button>
     </div>
+    <p class="saved" role="status">${isNew ? 'Zapisze się samo, gdy wpiszesz, co i za ile.' : 'Zmiany zapisują się same.'}</p>
     ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Usunąć to życzenie? Jeśli ktoś już to kupuje, zniknie też z jego zakładki Kupuję.', 'Usuń') : ''}
   </div>`;
 }
@@ -224,9 +284,11 @@ function ownerBlocks(ownerId) {
   const m = member(ownerId);
   const ws = wishesOf(ownerId);
   const letterBody = S.editLetter === ownerId
-    ? `<div class="form"><label class="sr" for="f-letter">Treść listu</label>
-        <textarea class="in big" id="f-letter" maxlength="4000" placeholder="${own ? 'Drogi Mikołaju, w tym roku…' : `Napisz tak, jak ${esc(m.name)} by to powiedział(a)…`}">${esc(m.letter)}</textarea>
-        <div class="actions"><button class="a solid" data-act="save-letter" data-owner="${ownerId}">Zapisz</button><button class="a quiet" data-act="cancel-letter">Anuluj</button></div></div>`
+    ? `<div class="form letter-form"><label class="sr" for="f-letter">Treść listu</label>
+        <textarea class="in big" id="f-letter" data-owner="${ownerId}" maxlength="4000" placeholder="${own ? 'Drogi Mikołaju, w tym roku…' : `Napisz tak, jak ${esc(m.name)} by to powiedział(a)…`}">${esc(m.letter)}</textarea>
+        <p class="hint">${own ? 'Kilka zdań o sobie — co lubisz, a czego nie.' : 'Kilka zdań — co ta osoba lubi, a czego nie.'} Konkretne prezenty dodaj jako życzenia — z nich bliscy wybierają, co kupić.</p>
+        <div class="actions"><button class="a solid" data-act="done-letter">Gotowe</button><button class="a line" data-act="add" data-owner="${ownerId}">Dodaj życzenie</button></div>
+        <p class="saved" role="status">List zapisuje się sam.</p></div>`
     : m.letter
       ? `<p class="mine-letter"><span class="salut">Drogi Mikołaju,</span> ${esc(m.letter)}</p><div class="actions"><button class="a line" data-act="edit-letter" data-owner="${ownerId}">Edytuj list</button></div>`
       : `<p class="empty">${own ? 'Nie masz jeszcze listu. Kilka zdań o tym, co lubisz, a czego nie.' : `${esc(m.name)} nie ma jeszcze listu. Możesz go spisać z rozmowy.`}</p>
@@ -297,7 +359,7 @@ function vMine() {
         </div>
         ${S.confirm?.act === 'remove-person' && S.confirm.id === m.id ? confirmBox('remove-person', m.id, `Usunąć: ${esc(m.name)}? Zniknie list i życzenia tej osoby.`, 'Usuń') : ''}`)).join('');
 
-  const addPerson = !me().canAdd ? '' : S.addingPerson
+  const addPerson = S.addingPerson
     ? `<div class="add-person"><div class="form">
         ${field('Imię, np. Zosia albo Babcia Hela', '<input class="in" id="f-person" maxlength="60">')}
         <div class="actions"><button class="a solid" data-act="save-person">Dodaj osobę</button><button class="a quiet" data-act="cancel-person">Anuluj</button></div>
@@ -347,12 +409,11 @@ function vFamily() {
   const row = m => {
     const own = m.id === me().id, open = S.fam === m.id;
     const meta = m.managedBy ? `bez konta · prowadzi ${name(m.managedBy)}`
-      : [esc(m.email), m.isAdmin ? 'organizator' : '', m.canAdd ? 'może dodawać osoby' : ''].filter(Boolean).join(' · ');
+      : [esc(m.email), m.isAdmin ? 'organizator' : ''].filter(Boolean).join(' · ');
     let actions = '';
     const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
-        <button class="a" data-act="toggle-add" data-id="${m.id}" data-on="${m.canAdd ? '' : '1'}">${m.canAdd ? 'Nie może dodawać osób' : 'Może dodawać osoby'}</button>
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
         <button class="a quiet" data-act="remove-member" data-id="${m.id}">Usuń z rodziny</button>`}
       </div>
@@ -438,7 +499,7 @@ function vEdit() {
   const m = member(S.editOwner);
   if (!m || !god()) { S.screen = 'family'; return vFamily(); }
   return `${vHead()}<section class="fade">
-    <div class="actions"><button class="a quiet" data-go="family">← Rodzina</button></div>
+    <div class="actions"><button class="a quiet" data-go="${S.editFrom === 'lists' ? 'lists' : 'family'}">← ${S.editFrom === 'lists' ? 'Listy' : 'Rodzina'}</button></div>
     <h1 class="title mt">${esc(m.name)}</h1>
     <p class="sub">Zmieniasz jako organizator. ${esc(m.name)} zobaczy zmiany na swojej liście.</p>
     ${ownerBlocks(m.id)}
@@ -449,9 +510,10 @@ const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — st
 const PUB = () => `<div class="topbar"><header class="head pub">${MARK}${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
-  const mail = (label = 'E-mail') => field(label, '<input class="in" name="email" type="email" required autocomplete="email">');
+  const mail = (label = 'E-mail', value = '') => field(label, `<input class="in" name="email" type="email" value="${esc(value)}" required autocomplete="email">`);
+  // zaproszenie mailem niesie adres — wpisany od razu, do zmiany
   const account = `${field('Twoje imię', '<input class="in" name="name" maxlength="60" required autocomplete="given-name">')}
-      ${mail('E-mail — posłuży do logowania')}
+      ${mail('E-mail — posłuży do logowania', S.screen === 'join' ? S.prefill : '')}
       ${passField('Hasło — co najmniej 4 znaki', 'new-password')}`;
   if (S.screen === 'register') return `${PUB()}<section class="auth fade">
     <h1 class="title">Załóż rodzinę</h1>
@@ -558,6 +620,7 @@ function enterFamily(screen = 'lists') {
 }
 const fromHash = () => Object.keys(PUBLIC).find(k => k !== 'landing' && PUBLIC[k] === location.hash) || Object.keys(TABS).find(k => TABS[k] === location.hash) || 'lists';
 function go(screen, push = true) {
+  flushSave();
   Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null });
   const hash = (S.data?.user ? TABS : PUBLIC)[screen];
   // każdy ekran to wpis w historii — przycisk Wstecz wraca do poprzedniego, zamiast zamykać aplikację
@@ -607,19 +670,27 @@ function toggleFold(key, bulk = false) {
   }
 }
 
-let toastTimer, undoFn = null;
+let toastTimer;
 // Zwykły komunikat znika sam (dłuższy tekst — później); błąd zostaje, aż ktoś go zamknie.
-function toast(msg, undo, sticky = false) {
+// Bez „Cofnij” — przycisk w komunikacie wyglądał jak potwierdzenie i bywał klikany przypadkiem.
+function toast(msg, sticky = false) {
   $('.toast')?.remove();
   clearTimeout(toastTimer);
   const el = document.createElement('div');
   el.className = 'toast'; el.setAttribute('role', sticky ? 'alert' : 'status');
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button data-act="undo">Cofnij</button>' : ''}${sticky ? '<button data-act="close-toast">Zamknij</button>' : ''}`;
+  el.innerHTML = `<span>${esc(msg)}</span>${sticky ? '<button data-act="close-toast">Zamknij</button>' : ''}`;
   document.body.appendChild(el);
-  undoFn = undo || null;
   if (!sticky) toastTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, Math.max(5000, msg.length * 80));
 }
 const focusFirst = () => setTimeout(() => $('.form .in')?.focus(), 0);
+// pisany list u góry ekranu — pod nim widać jeszcze „Dodaj życzenie”
+function openLetter() {
+  const t = $('#f-letter'); if (!t) return;
+  grow(t);
+  t.closest('.fold')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  t.focus({ preventScroll: true });
+  t.setSelectionRange(t.value.length, t.value.length);
+}
 function setTheme(t) {
   theme = t;
   try { localStorage.setItem('mikolaj.theme', t); } catch {}
@@ -640,7 +711,7 @@ document.addEventListener('click', e => {
   pressed = t; queueMicrotask(() => { pressed = null; });
   if (d.go) return go(d.go);
   if (d.toggle) { toggleFold(d.toggle); return syncAll(); }
-  if (d.edit) { S.editWish = d.edit; S.adding = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); render(); return focusFirst(); }
+  if (d.edit) return settle(() => { S.editWish = d.edit; S.adding = null; S.editLetter = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); }).then(focusFirst);
   if (d.filter) { S.filter[d.pid] = d.filter; return render(); }
   const id = d.id;
   switch (d.act) {
@@ -669,33 +740,25 @@ document.addEventListener('click', e => {
       const input = t.closest('form').querySelector('[name="password"]'), show = input.type === 'password';
       input.type = show ? 'text' : 'password'; t.textContent = show ? 'Ukryj hasło' : 'Pokaż hasło'; return; }
     case 'mails': { const on = !me().mails; return act(() => api('account', 'PATCH', { mails: on }), on ? 'Przypomnienia mailem włączone' : 'Nie będziemy wysyłać przypomnień mailem'); }
-    case 'undo': { const f = undoFn; undoFn = null; $('.toast')?.remove(); return f && act(f); }
 
     // rezerwacje
-    case 'reserve': return act(() => api(`wishes/${id}/reserve`, 'POST'), 'Kupujesz to — znajdziesz to w zakładce Kupuję', () => api(`wishes/${id}/reserve`, 'DELETE'));
+    case 'reserve': return act(() => api(`wishes/${id}/reserve`, 'POST'), 'Kupujesz to — znajdziesz to w zakładce Kupuję');
     case 'buy': { const p = !wish(id).purchased; return act(() => api(`wishes/${id}/reserve`, 'PATCH', { purchased: p }), p ? 'Oznaczone jako kupione' : null); }
-    case 'cancel': return act(() => api(`wishes/${id}/reserve`, 'DELETE'), 'Prezent znów jest wolny', () => api(`wishes/${id}/reserve`, 'POST'));
+    case 'cancel': return act(() => api(`wishes/${id}/reserve`, 'DELETE'), 'Prezent znów jest wolny');
 
     // życzenia i listy
-    case 'add': S.adding = d.owner; S.editWish = null; S.open.add(secKey('wishes', d.owner)); render(); return focusFirst();
-    case 'close-edit': S.adding = null; S.editWish = null; S.confirm = null; return render();
-    case 'save-wish': {
-      const title = $('#f-title').value.trim();
-      if (!title) return $('#f-title').focus();
-      if (!$('#f-tier').value) return $('#f-tier').focus();
-      const f = { title, note: $('#f-note').value.trim(), url: $('#f-url').value.trim(), tier: $('#f-tier').value };
-      return act(async () => {
-        await (id ? api(`wishes/${id}`, 'PATCH', f) : api('wishes', 'POST', { ...f, ownerId: d.owner }));
-        S.adding = null; S.editWish = null;
-      }, id ? 'Zapisano' : 'Dodano'); }
+    case 'add': return settle(() => { S.adding = d.owner; S.editWish = null; S.editLetter = null; S.confirm = null; S.open.add(secKey('wishes', d.owner)); })
+      .then(() => { $('.wish-form')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); focusFirst(); });
+    case 'done-wish': {
+      const form = t.closest('.wish-form');
+      if (!form.dataset.id && form.querySelector('#f-title').value.trim() && !form.querySelector('#f-tier').value) {
+        saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return form.querySelector('#f-tier').focus(); }
+      return settle(() => { if (saveError) return false; S.adding = null; S.editWish = null; S.confirm = null; }); }
+    case 'done-letter': return settle(() => { if (saveError) return false; S.editLetter = null; });
     case 'delete-wish':
-      if (!d.sure) { S.confirm = { act: 'delete-wish', id }; return render(); }
+      if (!d.sure) return settle(() => { S.confirm = { act: 'delete-wish', id: t.dataset.id }; });
       return act(async () => { await api(`wishes/${id}`, 'DELETE'); S.editWish = null; S.confirm = null; }, 'Usunięto');
-    case 'edit-letter': S.editLetter = d.owner; S.open.add(secKey('letter', d.owner)); render(); return focusFirst();
-    case 'cancel-letter': S.editLetter = null; return render();
-    case 'save-letter': {
-      const letter = $('#f-letter').value.trim();
-      return act(async () => { await api(`members/${d.owner}/letter`, 'PATCH', { letter }); S.editLetter = null; }, 'List zapisany'); }
+    case 'edit-letter': return settle(() => { S.editLetter = d.owner; S.adding = null; S.editWish = null; S.confirm = null; S.open.add(secKey('letter', d.owner)); }).then(openLetter);
 
     // osoby prowadzone
     case 'add-person': S.addingPerson = true; render(); return focusFirst();
@@ -706,8 +769,7 @@ document.addEventListener('click', e => {
       return act(async () => {
         const { id: nid } = await api('members', 'POST', { name });
         S.addingPerson = false; S.editLetter = nid; S.open.add(secKey('letter', nid));
-        setTimeout(() => { document.querySelector(`[data-fold="${secKey('letter', nid)}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); focusFirst(); }, 0);
-      }, `Dodano: ${name}`); }
+      }, `Dodano: ${name}`).then(openLetter); }
     case 'remove-person':
       if (!d.sure) { S.confirm = { act: 'remove-person', id }; return render(); }
       return act(async () => { await api(`members/${id}`, 'DELETE'); S.confirm = null; }, 'Usunięto');
@@ -728,7 +790,7 @@ document.addEventListener('click', e => {
     case 'assign-save': {
       const buyerId = $('#f-buyer').value;
       return act(async () => { await (buyerId ? api(`wishes/${id}/reserve`, 'POST', { buyerId }) : api(`wishes/${id}/reserve`, 'DELETE')); S.assign = null; }, buyerId ? 'Przypisano' : 'Prezent znów jest wolny'); }
-    case 'edit-person': S.editOwner = id; go('edit'); return;
+    case 'edit-person': S.editOwner = id; S.editFrom = S.screen; go('edit'); return;
     case 'add-people': {
       const names = [...new Set($('#f-people').value.split('\n').map(n => n.trim()).filter(Boolean))].slice(0, 30);
       if (!names.length) return $('#f-people').focus();
@@ -739,7 +801,6 @@ document.addEventListener('click', e => {
     case 'new-invite':
       if (!d.sure) { S.confirm = { act: 'new-invite' }; return render(); }
       return act(async () => { await api('invite', 'POST'); S.confirm = null; }, 'Nowy link gotowy. Stary już nie działa.');
-    case 'toggle-add': return act(() => api(`members/${id}`, 'PATCH', { canAdd: Boolean(d.on) }), 'Zapisano');
     case 'save-manager': return act(() => api(`members/${id}`, 'PATCH', { managedBy: $('#f-manager').value }), 'Zapisano, kto prowadzi listę');
     case 'make-admin':
       if (!d.sure) { S.confirm = { act: 'make-admin', id }; return render(); }
@@ -781,10 +842,8 @@ document.addEventListener('submit', e => {
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || !S.data?.user) return;
-  if (S.editWish || S.adding || S.editLetter || S.addingPerson || S.confirm) {
-    Object.assign(S, { editWish: null, adding: null, editLetter: null, addingPerson: false, confirm: null });
-    render();
-  }
+  if (S.editWish || S.adding || S.editLetter || S.addingPerson || S.confirm)
+    settle(() => { Object.assign(S, { editWish: null, adding: null, editLetter: null, addingPerson: false, confirm: null }); });
 });
 
 /* ===================== START ===================== */
@@ -792,21 +851,22 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
 async function start() {
   setTheme(theme);
   const hash = location.hash;
-  const token = hash.match(/^#(invite|link|nomail)=([a-f0-9]{64})$/);
+  const token = hash.match(/^#(invite|link|nomail)=([a-f0-9]{64})(?:&email=([^&]+))?$/);
   if (token?.[1] === 'nomail') {
     history.replaceState(null, '', '#/');
-    api('mails/off', 'POST', { token: token[2] }).then(() => toast('Nie będziemy już wysyłać przypomnień na ten adres. Włączysz je z powrotem w menu pod swoim imieniem.'), err => toast(err.message, null, true));
+    api('mails/off', 'POST', { token: token[2] }).then(() => toast('Nie będziemy już wysyłać przypomnień na ten adres. Włączysz je z powrotem w menu pod swoim imieniem.'), err => toast(err.message, true));
   } else if (token) {
     // Sekret tylko w pamięci — usuń go z paska adresu.
     history.replaceState(null, '', '#/');
     S.token = token[2];
+    try { S.prefill = token[3] ? decodeURIComponent(token[3]).slice(0, 254) : ''; } catch {}
     try {
       if (token[1] === 'invite') { S.info = await api(`invitation/${S.token}`); S.screen = 'join'; }
       if (token[1] === 'link') { S.info = await api(`link/${S.token}`); S.screen = 'link'; }
-    } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message, null, true), 0); }
+    } catch (err) { S.screen = 'login'; S.token = null; setTimeout(() => toast(err.message, true), 0); }
   }
   if (!token || token[1] === 'nomail') S.screen = fromHash();
-  try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message, null, true); }
+  try { await refresh(); } catch (err) { S.data = { user: null }; toast(err.message, true); }
   // Zalogowany z zaproszeniem — dołącza tym samym kontem. Z linkiem do hasła/listy — najpierw link.
   if (S.token && S.data.user && S.screen === 'join') S.screen = 'joinfam';
   else if (S.token && S.data.user) S.data = { user: null };
