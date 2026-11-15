@@ -636,6 +636,15 @@ function syncTop() { document.documentElement.style.setProperty('--top', topOffs
 addEventListener('resize', syncTop);
 addEventListener('popstate', () => { if (booted) go(fromHash(), false); });
 function markFits() {
+  // zwinięta osoba na Listach: widać list (dwie linijki) i całe pierwsze życzenie, dalej lista gaśnie
+  document.querySelectorAll('.person').forEach(f => {
+    const g = f.querySelector('.gift'), inner = f.querySelector('.peek-inner');
+    if (!g) return f.style.removeProperty('--peek');
+    let h = g.getBoundingClientRect().bottom - inner.getBoundingClientRect().top;
+    const l = f.classList.contains('open') && f.querySelector('.letter');  // rozwinięta — list nieprzycięty
+    if (l) h -= l.offsetHeight - Math.min(l.offsetHeight, 2 * parseFloat(getComputedStyle(l).lineHeight));
+    f.style.setProperty('--peek', Math.ceil(h) + 48 + 'px');
+  });
   document.querySelectorAll('.fold').forEach(f => {
     const limit = parseFloat(getComputedStyle(f).getPropertyValue('--peek'));
     f.classList.toggle('fits', f.querySelector('.peek-inner').offsetHeight <= limit + 24);
@@ -656,8 +665,11 @@ function toggleFold(key, bulk = false) {
   open ? S.open.add(key) : S.open.delete(key);
   f.querySelectorAll('[data-toggle]').forEach(b => b.setAttribute('aria-expanded', open));
   if (open) {
-    peek.style.maxHeight = peek.scrollHeight + 'px';
+    // od obecnej wysokości do pełnej — po rozwinięciu list już nie jest przycięty, więc mierzymy z klasą open
+    peek.style.maxHeight = peek.offsetHeight + 'px';
     f.classList.add('open');
+    peek.offsetHeight;
+    peek.style.maxHeight = peek.scrollHeight + 'px';
     peek.addEventListener('transitionend', () => { if (S.open.has(key)) peek.style.maxHeight = ''; }, { once: true });
   } else {
     // nagłówek przyklejony w głębi listy — wróć do początku sekcji

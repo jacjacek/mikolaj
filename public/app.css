@@ -97,7 +97,9 @@ button[disabled] { opacity: .5; cursor: default; }
 .more { display: block; margin: 0; font-size: 0.9375rem; padding: 11px 0; }
 .fold.open > .more, .fold.fits > .more { display: none; }
 
-.person { --peek: 60px; --fade: 32px; margin-bottom: 56px; }
+.person { --peek: 60px; --fade: 56px; margin-bottom: 56px; }
+/* zwinięty podgląd: list w dwóch linijkach, żeby było widać pierwsze życzenie */
+@media (max-width: 1099px) { .person:not(.open) .letter { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; } }
 .person.open { margin-bottom: 80px; }
 .person .name { font: 400 2rem/1.15 var(--serif); letter-spacing: -.015em; }
 .person .name small { display: block; font: 400 0.875rem/1.3 var(--sans); color: var(--faint); margin-top: 2px; }
