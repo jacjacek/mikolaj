@@ -86,6 +86,16 @@ await check('Own reservations never appear in organiser response', async () => {
   const after = (await f.call('admin', 'GET', undefined, a.cookie)).body;
   assert.equal('hidden' in after, false); assert.equal(after.reservations.length,0);
 });
+await check('Checked delete keeps a wish someone is buying and never names the buyer', async () => {
+  const f = fixture(), a = await f.register('A'), b = await f.join(a, 'B'), taken = await f.addWish(a), free = await f.addWish(a);
+  await f.call(`wishes/${taken}/reserve`, 'POST', {}, b.cookie);
+  const warned = await f.call(`wishes/${taken}?check=1`, 'DELETE', undefined, a.cookie);
+  assert.deepEqual(warned.body, { reserved: true });
+  assert.equal((await f.call(`wishes/${free}?check=1`, 'DELETE', undefined, a.cookie)).body.ok, true);
+  const left = (await f.call('state', 'GET', undefined, a.cookie)).body.wishes.map(w => w.id);
+  assert.deepEqual(left, [taken]);
+  assert.equal((await f.call(`wishes/${taken}`, 'DELETE', undefined, a.cookie)).body.state.wishes.length, 0);
+});
 await check('Organiser cannot obtain existing account reset token', async () => {
   const f = fixture(), a = await f.register('A'), b = await f.join(a, 'B');
   assert.equal((await f.call(`members/${b.id}/link`, 'POST', {}, a.cookie)).status,403);

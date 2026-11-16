@@ -113,7 +113,7 @@ async function settle(fn) { await flushSave(); if (fn() !== false) render(); }
 // pola formularza życzenia; null, gdy jeszcze nie ma czego zapisać
 function wishValues(form) {
   const v = name => form.querySelector('#f-' + name).value.trim();
-  const f = { title: v('title'), note: v('note'), url: v('url'), tier: v('tier') };
+  const f = { title: v('title'), note: v('note'), url: v('url'), tier: form.querySelector('[name="tier"]:checked')?.value || '' };
   if (!f.title) { saveStatus(form.dataset.id ? 'Wpisz, co chcesz dostać — wtedy zapiszemy.' : ''); return null; }
   if (!f.tier) { saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return null; }
   if (f.url && !/^[a-z][a-z0-9+.-]*:/i.test(f.url)) f.url = 'https://' + f.url;  // „allegro.pl/…” też działa
@@ -230,7 +230,7 @@ function vLists() {
   const others = S.data.members.filter(m => m.id !== me().id);
   const d = daysToEve();
   const mine = member(me().id);
-  const missing = !mine.letter ? 'listu' : !wishesOf(mine.id).length ? 'życzeń' : '';
+  const missing = !wishesOf(mine.id).length ? 'życzeń' : !mine.letter ? 'listu' : '';
   const order = { mine: 0, free: 1, taken: 2 };
   return `${vHead()}<section class="fade">
     <div class="title-row"><h1 class="title">Listy</h1>
@@ -255,8 +255,8 @@ function vLists() {
           </div>` : ''}
           ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
         ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
-        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień list i życzenia</button></div>`
-          : god() ? `<div class="actions mt"><button class="a line" data-act="edit-person" data-id="${p.id}">Zmień list i życzenia</button></div>` : ''}
+        ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień życzenia i list</button></div>`
+          : god() ? `<div class="actions mt"><button class="a line" data-act="edit-person" data-id="${p.id}">Zmień życzenia i list</button></div>` : ''}
         <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">Zwiń</button></p>`;
       return fold('p:' + p.id, 'person', head, body);
     }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
@@ -267,30 +267,35 @@ function vLists() {
 
 // Jedno życzenie = jeden prezent — w testach ktoś wpisał wszystkie prezenty w jedno pole,
 // więc formularz mówi to wprost: numer życzenia, etykieta, ostrzeżenie przy liście po przecinku.
+// Na wierzchu tylko dwie rzeczy: co i za ile (cena to duże przyciski, nie lista rozwijana); reszta pod „jeśli chcesz”.
 function wishForm(w, isNew) {
   return `<div class="form wish-form" data-id="${isNew ? '' : w.id}" data-owner="${w.ownerId}">
     ${isNew ? `<p class="wish-no">Życzenie ${wishesOf(w.ownerId).length + 1}<span>Jeden prezent. Każdy kolejny dodasz osobno — bliscy wybierają je pojedynczo.</span></p>` : ''}
     ${field('Jeden prezent — co to ma być?', `<input class="in" id="f-title" value="${esc(w.title)}" maxlength="160" placeholder="np. ciepły szal">`)}
     <p class="many" hidden>Wygląda na kilka prezentów. Wpisz tu jeden, a kolejne dodaj osobno przyciskiem „Dodaj kolejne” — wtedy bliscy mogą wybrać każdy z osobna.</p>
-    ${field('Wskazówki — rozmiar, kolor, marka', `<textarea class="in" id="f-note" maxlength="1500">${esc(w.note)}</textarea>`)}
-    ${field('Ile może kosztować?', `<select class="in" id="f-tier" required>
-      <option value="" disabled ${w.tier ? '' : 'selected'}>Wybierz</option>
-      ${TIERS.map(t => `<option value="${t.id}" ${w.tier === t.id ? 'selected' : ''}>${t.range} — ${t.name}</option>`).join('')}
-    </select>`)}
-    ${field('Link do sklepu — jeśli masz', `<input class="in" id="f-url" value="${esc(w.url)}" placeholder="https://" maxlength="2000" inputmode="url">`)}
+    <fieldset class="tiers"><legend>Ile może kosztować?</legend><div class="tiers-grid">
+      ${TIERS.map(t => `<label class="tier"><input class="sr" type="radio" name="tier" value="${t.id}" ${w.tier === t.id ? 'checked' : ''}><span><b>${t.range}</b><small>${t.name}</small></span></label>`).join('')}
+    </div></fieldset>
+    <details class="extra" ${w.note || w.url ? 'open' : ''}><summary>Rozmiar, kolor, link do sklepu — jeśli chcesz</summary>
+      ${field('Wskazówki — rozmiar, kolor, marka', `<textarea class="in" id="f-note" maxlength="1500">${esc(w.note)}</textarea>`)}
+      ${field('Link do sklepu', `<input class="in" id="f-url" value="${esc(w.url)}" placeholder="https://" maxlength="2000" inputmode="url">`)}
+    </details>
     <div class="actions">
       <button class="a solid" data-act="done-wish">Gotowe</button>
       ${isNew ? '<button class="a line" data-act="done-wish" data-next="1">Dodaj kolejne</button>' : ''}
       <button class="a line push" data-act="delete-wish" data-id="${isNew ? '' : w.id}" ${isNew ? 'hidden' : ''}>Usuń</button>
     </div>
+    ${/* tuż pod przyciskiem „Usuń”, po tej samej stronie — niżej łatwo je przeoczyć */ ''}
+    ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Ktoś już to kupuje — lepiej nie usuwać. Jeśli usuniesz, prezent zniknie też z jego zakładki Kupuję.', 'Usuń mimo to', 'Zostaw') : ''}
     <p class="saved" role="status">${isNew ? 'Zapisze się samo, gdy wpiszesz, co i za ile.' : 'Zmiany zapisują się same.'}</p>
-    ${!isNew && S.confirm?.act === 'delete-wish' && S.confirm.id === w.id ? confirmBox('delete-wish', w.id, 'Usunąć to życzenie? Jeśli ktoś już to kupuje, zniknie też z jego zakładki Kupuję.', 'Usuń') : ''}
   </div>`;
 }
-const confirmBox = (act, id, q, yes) => `<div class="confirm"><p>${q}</p><div class="actions">
-  <button class="a solid" data-act="${act}" data-id="${id || ''}" data-sure="1">${yes}</button><button class="a quiet" data-act="confirm-cancel">Anuluj</button></div></div>`;
+// keep: gdy lepiej zrezygnować — wtedy to rezygnacja jest głównym przyciskiem
+const confirmBox = (act, id, q, yes, keep) => `<div class="confirm"><p>${q}</p><div class="actions">
+  ${keep ? `<button class="a solid" data-act="confirm-cancel">${keep}</button>` : ''}
+  <button class="a ${keep ? 'quiet' : 'solid'}" data-act="${act}" data-id="${id || ''}" data-sure="1">${yes}</button>${keep ? '' : '<button class="a quiet" data-act="confirm-cancel">Anuluj</button>'}</div></div>`;
 
-// list + życzenia jednej osoby (mojej albo prowadzonej przeze mnie)
+// życzenia + list jednej osoby (mojej albo prowadzonej przeze mnie)
 function ownerBlocks(ownerId) {
   const own = ownerId === me().id;
   const m = member(ownerId);
@@ -303,11 +308,12 @@ function ownerBlocks(ownerId) {
         <p class="saved" role="status">List zapisuje się sam.</p></div>`
     : m.letter
       ? `<p class="mine-letter"><span class="salut">Drogi Mikołaju,</span> ${esc(m.letter)}</p><div class="actions"><button class="a line" data-act="edit-letter" data-owner="${ownerId}">Edytuj list</button></div>`
-      : `<p class="empty">${own ? 'Nie masz jeszcze listu. Kilka zdań o tym, co lubisz, a czego nie.' : `${esc(m.name)} nie ma jeszcze listu. Możesz go spisać z rozmowy.`}</p>
-         <div class="actions mt"><button class="a solid" data-act="edit-letter" data-owner="${ownerId}">Napisz list</button></div>`;
+      : `<p class="empty">${own ? 'Nie masz jeszcze listu. Dopisz kilka zdań o tym, co lubisz, a czego nie — przyda się, gdy ktoś zechce kupić coś spoza życzeń.' : `${esc(m.name)} nie ma jeszcze listu. Możesz go spisać z rozmowy.`}</p>
+         <div class="actions mt"><button class="a line" data-act="edit-letter" data-owner="${ownerId}">Napisz list</button></div>`;
   // opiekun nie jest obdarowanym, więc widzi, co już ktoś kupuje — żeby nie dopisywać dubli
   const stLine = w => !w.taken ? '' : `<span class="st">${w.taken === 'me' ? 'Ty to kupujesz' : w.purchased ? 'Już kupione' : 'Ktoś już to kupuje'}</span>`;
   const wishesBody = `
+    ${ws.length || S.adding === ownerId ? '' : `<p class="empty">${own ? 'Wpisz, co chcesz dostać — każdy prezent osobno.' : `Wpisz, co chce dostać ${esc(m.name)} — każdy prezent osobno.`} Bliscy wybiorą z tej listy, co kupić.</p>`}
     <p class="priv">${own ? 'Nie widzisz, co już ktoś dla Ciebie kupuje.' : 'Widzisz, co inni już kupili z tej listy. Nie zdradź niespodzianki.'}</p>
     ${byTier(ws, w => S.editWish === w.id ? wishForm(w, false) : `<div class="gift">
       <span class="t">${esc(w.title)}</span>
@@ -317,8 +323,9 @@ function ownerBlocks(ownerId) {
     ${S.adding === ownerId ? wishForm({ title: '', note: '', url: '', tier: '', ownerId }, true)
       : `<div class="actions mt"><button class="a solid" data-act="add" data-owner="${ownerId}">${ws.length ? 'Dodaj życzenie' : 'Dodaj pierwsze życzenie'}</button></div>`}`;
   // czyja to lista, mówi przyklejone imię nad sekcjami
-  return fold(secKey('letter', ownerId), 'sec', '<h2>List</h2>', letterBody)
-       + fold(secKey('wishes', ownerId), 'sec', `<h2>Życzenia${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody);
+  // najpierw życzenia — to z nich bliscy wybierają prezenty; list jest dopowiedzeniem
+  return fold(secKey('wishes', ownerId), 'sec', `<h2>Życzenia${ws.length ? ` · ${ws.length}` : ''}</h2>`, wishesBody)
+       + fold(secKey('letter', ownerId), 'sec', '<h2>List</h2>', letterBody);
 }
 
 // Kupuję — osobna zakładka: co wybrałem dla innych, pogrupowane według obdarowanych
@@ -352,7 +359,7 @@ function vBuying() {
   </section>`;
 }
 
-// Moje — mój list i życzenia oraz osoby, które prowadzę; każda osoba z przyklejonym imieniem
+// Moje — moje życzenia i list oraz osoby, które prowadzę; każda osoba z przyklejonym imieniem
 function vMine() {
   const managed = managedBy(me().id);
   const block = (m, sub, extra = '') => `
@@ -364,7 +371,7 @@ function vMine() {
       </div>
       <div class="managed-body">${ownerBlocks(m.id)}</div>
     </div>`;
-  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz list i życzenia. Prezenty dla innych kupujesz ze swojego konta.', `
+  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz życzenia i list. Prezenty dla innych kupujesz ze swojego konta.', `
         <div class="actions managed-actions">
           <button class="a quiet" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
           <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
@@ -377,14 +384,14 @@ function vMine() {
         <div class="actions"><button class="a solid" data-act="save-person">Dodaj osobę</button><button class="a quiet" data-act="cancel-person">Anuluj</button></div>
       </div></div>`
     : `<div class="add-person">
-        <p class="sub">Dziecko bez telefonu albo ktoś, kto nie chce korzystać z aplikacji? Dodaj tę osobę i wpisuj list oraz życzenia za nią.</p>
+        <p class="sub">Dziecko bez telefonu albo ktoś, kto nie chce korzystać z aplikacji? Dodaj tę osobę i wpisuj życzenia oraz list za nią.</p>
         <div class="actions mt"><button class="a line" data-act="add-person">Dodaj osobę</button></div>
       </div>`;
 
   return `${vHead()}<section class="fade">
     <h1 class="title">Moje</h1>
-    <p class="sub">Twój list i życzenia${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
-    <div class="own">${block(member(me().id), 'Twój list do Mikołaja i lista życzeń.')}</div>
+    <p class="sub">Twoje życzenia i list${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
+    <div class="own">${block(member(me().id), 'Twoje życzenia i list do Mikołaja.')}</div>
     ${managedHtml}
     ${addPerson}
   </section>`;
@@ -423,7 +430,7 @@ function vFamily() {
     const meta = m.managedBy ? `bez konta · prowadzi ${name(m.managedBy)}`
       : [esc(m.email), m.isAdmin ? 'organizator' : ''].filter(Boolean).join(' · ');
     let actions = '';
-    const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj list i życzenia</button>`;
+    const editBtn = own || !god() ? '' : `<button class="a line" data-act="edit-person" data-id="${m.id}">Edytuj życzenia i list</button>`;
     if (open && !m.managedBy) actions = `<div class="fam-actions">
         ${editBtn}
         ${own ? '' : `<button class="a" data-act="make-admin" data-id="${m.id}">Przekaż rolę organizatora</button>
@@ -619,6 +626,7 @@ function render(animate = false) {
   }
   el.innerHTML = view;
   if (!animate) { $('.fade')?.classList.remove('fade'); window.scrollTo(0, y); }
+  if (S.confirm) $('.confirm')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });  // pytanie zawsze w kadrze
   markFits();
   syncTop();
   syncAll();
@@ -707,7 +715,7 @@ function toast(msg, sticky = false) {
   if (!sticky) toastTimer = setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, Math.max(5000, msg.length * 80));
 }
 const focusFirst = () => setTimeout(() => $('.form .in')?.focus(), 0);
-// pisany list u góry ekranu — pod nim widać jeszcze „Dodaj życzenie”
+// pisany list u góry ekranu, kursor na końcu
 function openLetter() {
   const t = $('#f-letter'); if (!t) return;
   grow(t);
@@ -775,15 +783,19 @@ document.addEventListener('click', e => {
       .then(() => { $('.wish-form')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); focusFirst(); });
     case 'done-wish': {
       const form = t.closest('.wish-form');
-      if (!form.dataset.id && form.querySelector('#f-title').value.trim() && !form.querySelector('#f-tier').value) {
-        saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return form.querySelector('#f-tier').focus(); }
+      if (!form.dataset.id && form.querySelector('#f-title').value.trim() && !form.querySelector('[name="tier"]:checked')) {
+        saveStatus('Wybierz, ile może kosztować — wtedy zapiszemy.'); return form.querySelector('[name="tier"]').focus(); }
       const next = d.next && form.dataset.owner;
       return settle(() => { if (saveError) return false; S.adding = next || null; S.editWish = null; S.confirm = null; })
         .then(() => { if (next && S.adding) { $('.wish-form')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); focusFirst(); } }); }
     case 'done-letter': return settle(() => { if (saveError) return false; S.editLetter = null; });
     case 'delete-wish':
-      if (!d.sure) return settle(() => { S.confirm = { act: 'delete-wish', id: t.dataset.id }; });
-      return act(async () => { await api(`wishes/${id}`, 'DELETE'); S.editWish = null; S.confirm = null; }, 'Usunięto');
+      // usuwa od razu; pyta tylko wtedy, gdy ktoś już to kupuje — serwer mówi, że ktoś, nie mówi kto
+      return act(async () => {
+        const r = await api(`wishes/${id}${d.sure ? '' : '?check=1'}`, 'DELETE');
+        if (r.reserved) { S.confirm = { act: 'delete-wish', id }; return; }
+        S.editWish = null; S.confirm = null; toast('Usunięto');
+      });
     case 'edit-letter': return settle(() => { S.editLetter = d.owner; S.adding = null; S.editWish = null; S.confirm = null; S.open.add(secKey('letter', d.owner)); }).then(openLetter);
 
     // osoby prowadzone
@@ -794,8 +806,8 @@ document.addEventListener('click', e => {
       if (!name) return $('#f-person').focus();
       return act(async () => {
         const { id: nid } = await api('members', 'POST', { name });
-        S.addingPerson = false; S.editLetter = nid; S.open.add(secKey('letter', nid));
-      }, `Dodano: ${name}`).then(openLetter); }
+        S.addingPerson = false; S.adding = nid; S.open.add(secKey('wishes', nid));
+      }, `Dodano: ${name}`).then(() => { $('.wish-form')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); focusFirst(); }); }
     case 'remove-person':
       if (!d.sure) { S.confirm = { act: 'remove-person', id }; return render(); }
       return act(async () => { await api(`members/${id}`, 'DELETE'); S.confirm = null; }, 'Usunięto');

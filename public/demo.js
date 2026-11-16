@@ -52,7 +52,7 @@ export function createDemo() {
     const mem = id => D.members.find(m => m.id === id) || fail('Nie znaleziono tej osoby.');
     const canEdit = m => m.id === me.id || m.managedBy === me.id || D.until > Date.now() / 1000;
     const out = v => Promise.resolve(JSON.parse(JSON.stringify(v)));
-    const [a, id, sub] = path.split('/');
+    const [a, id, sub] = path.split('?')[0].split('/');
     if (path === 'state') return out({
       family: { name: D.familyName || 'Nowakowie' },
       user: { id: me.id, name: me.name, email: me.email, isAdmin: me.isAdmin, adminUntil: me.isAdmin && D.until > Date.now() / 1000 ? D.until : 0, mails: true },
@@ -89,7 +89,7 @@ export function createDemo() {
         if (method === 'PATCH') r.purchased = body.purchased;
       } else {
         if (method === 'PATCH') Object.assign(w, { title: body.title, note: body.note, url: body.url, tier: body.tier });
-        if (method === 'DELETE') { D.wishes = D.wishes.filter(x => x !== w); D.res = D.res.filter(x => x !== r); }
+        if (method === 'DELETE') { if (r && path.endsWith('?check=1')) return out({ reserved: true }); D.wishes = D.wishes.filter(x => x !== w); D.res = D.res.filter(x => x !== r); }
       }
       return out({ ok: true });
     }

@@ -708,6 +708,8 @@ export class FamilyStore extends DurableObject {
           return done();
         }
         if (method === 'DELETE') {
+          // ?check=1: usuń tylko, jeśli nikt tego nie kupuje — inaczej aplikacja najpierw ostrzeże (bez zdradzania, kto)
+          if (url.searchParams.get('check') === '1' && this.one('SELECT 1 AS x FROM reservations WHERE wish_id=?', w.id)) return json({ reserved: true });
           this.ctx.storage.transactionSync(() => {
             this.sql.exec('DELETE FROM reservations WHERE wish_id=?', w.id);
             this.sql.exec('DELETE FROM wishes WHERE id=?', w.id);
