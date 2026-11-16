@@ -241,6 +241,18 @@ select.in:invalid { color: var(--faint); }
 .landing .actions.mt { margin-top: 20px; }
 .landing .cta { margin-top: 36px; gap: 10px 24px; }
 .foot .a { font-size: inherit; }
+.landing .foot { margin: 96px 0 0; font-size: 0.875rem; }
+.landing .foot a { color: var(--faint); text-decoration: none; }
+.landing .foot a:hover { text-decoration: underline; }
+/* strona z tekstem (prywatność) */
+.doc { padding-bottom: 24px; }
+.doc h1 { font: 400 2.25rem/1.1 var(--serif); letter-spacing: -.02em; margin: 0 0 24px; }
+.doc h2 { font-size: 1rem; font-weight: 500; margin: 40px 0 8px; }
+.doc p, .doc li { color: var(--soft); font-size: 0.9375rem; line-height: 1.6; }
+.doc p { margin: 0 0 12px; }
+.doc ul { margin: 0 0 12px; padding-left: 1.2em; }
+.doc a { color: var(--ink); }
+.doc .sub { margin-top: 48px; color: var(--faint); }
 .hero { font: 400 3rem/1.04 var(--serif); letter-spacing: -.025em; margin: 0 0 28px; max-width: 10em; }
 .lead { font-size: 1.0625rem; line-height: 1.6; color: var(--soft); margin: 0 0 20px; max-width: 28em; }
 .sample { font: italic 400 1.1875rem/1.65 var(--serif); color: var(--soft); margin: 72px 0 0; max-width: 26em; }
