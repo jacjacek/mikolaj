@@ -40,7 +40,10 @@ def verify(base, revision):
     assert 'no-store' in headers.get('Cache-Control', ''), 'Revision endpoint must not be cached'
     for name in sorted(p.name for p in (ROOT / 'public').iterdir() if p.is_file() and p.name != 'index.html'):
         status, headers, body = fetch(base, '/' + name)
-        assert status == 200 and body == (ROOT / 'public' / name).read_bytes(), 'Source mismatch: ' + name
+        source = (ROOT / 'public' / name).read_bytes()
+        # Cloudflare may append its own script to HTML; every line of the source must still be there unchanged.
+        same = all(line.strip() in body for line in source.splitlines()) if name.endswith('.html') else body == source
+        assert status == 200 and same, 'Source mismatch: ' + name
         assert headers.get('X-Content-Type-Options') == 'nosniff', 'Missing security headers: ' + name
     status, headers, body = fetch(base, '/')
     assert status == 200, 'Application HTML did not return 200'
