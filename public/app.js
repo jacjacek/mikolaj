@@ -331,24 +331,21 @@ function vBuying() {
       ${changed(w)}
       <div class="row"><span class="act">
         <button class="a ${w.purchased ? 'quiet' : 'line'}" data-act="buy" data-id="${w.id}">${w.purchased ? 'Cofnij zakup' : 'Oznacz jako kupione'}</button>
-        <button class="a quiet" data-act="cancel" data-id="${w.id}">Rezygnuję</button></span>
+        ${w.purchased ? '' : `<button class="a quiet" data-act="cancel" data-id="${w.id}">Rezygnuję</button>`}</span>
         <span class="meta">${range(w)}${w.url ? `<a class="a quiet lnk" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">${esc(host(w.url))} ↗</a>` : ''}</span>
       </div>
     </div>`;
-  const groups = S.data.members.filter(m => res.some(w => w.ownerId === m.id)).map(m => {
-    const ws = res.filter(w => w.ownerId === m.id);
-    return `<div class="managed">
-      <div class="managed-head">
-        <h2 class="managed-name stick">${esc(m.name)}</h2>
-        <p class="sub">${ws.filter(w => w.purchased).length} z ${ws.length} kupione</p>
-      </div>
-      <div class="managed-body">${byTier(ws, item)}</div>
-    </div>`;
-  }).join('');
+  // kolejność się nie zmienia po kliknięciu — prezent nie ucieka spod palca; kupione są przekreślone
+  const groups = S.data.members.filter(m => res.some(w => w.ownerId === m.id)).map(m => `<div class="managed">
+      <div class="managed-head"><h2 class="managed-name stick">${esc(m.name)}</h2></div>
+      <div class="managed-body">${byTier(res.filter(w => w.ownerId === m.id), item)}</div>
+    </div>`).join('');
   return `${vHead()}<section class="fade">
     <h1 class="title">Kupuję</h1>
-    <p class="sub">${res.length ? `${bought} z ${res.length} kupione · ` : ''}Twoje zakupy. Organizator może je zobaczyć w trybie organizatora.</p>
-    ${res.length ? groups : `<p class="empty mt">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a line" data-go="lists">Przejrzyj listy</button></div>`}
+    ${res.length ? `<p class="sub">${bought === res.length ? 'Wszystko kupione.' : `${bought} z ${res.length} kupione`}</p>
+      ${groups}
+      <p class="priv buying-priv">Kto co kupuje, widzi tylko organizator — i to dopiero po włączeniu trybu organizatora.</p>`
+      : `<p class="empty mt">Nic jeszcze nie kupujesz.</p><div class="actions mt"><button class="a line" data-go="lists">Przejrzyj listy</button></div>`}
   </section>`;
 }
 
