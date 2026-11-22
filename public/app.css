@@ -143,6 +143,7 @@ button[disabled] { opacity: .5; cursor: default; }
 .mine-letter { font: 400 1.3125rem/1.55 var(--serif); margin: 0 0 12px; white-space: pre-line; overflow-wrap: anywhere; }
 .mine-letter .salut { font-style: italic; color: var(--soft); }
 .priv { color: var(--faint); font-size: 0.875rem; margin: 0 0 4px; }
+.buying-priv { margin-top: 96px; }
 .managed { margin-top: 72px; }
 .add-person { margin-top: 120px; }
 .managed-name { font: 400 2rem/1.1 var(--serif); letter-spacing: -.015em; margin: 0 0 6px; }
