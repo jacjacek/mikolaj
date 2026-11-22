@@ -359,19 +359,20 @@ function vBuying() {
   </section>`;
 }
 
-// Moje — moje życzenia i list oraz osoby, które prowadzę; każda osoba z przyklejonym imieniem
+// Moje — moje życzenia i list oraz osoby, które prowadzę; każda osoba z przyklejonym imieniem.
+// Dodanie osoby to rzadka, poboczna akcja — jedna cicha linijka na samym dole, daleko od list.
 function vMine() {
   const managed = managedBy(me().id);
-  const block = (m, sub, extra = '') => `
+  const block = (m, sub = '', extra = '') => `
     <div class="managed">
       <div class="managed-head">
         <h2 class="managed-name stick">${esc(m.name)}</h2>
-        <p class="sub">${sub}</p>
+        ${sub ? `<p class="sub">${sub}</p>` : ''}
         ${extra}
       </div>
       <div class="managed-body">${ownerBlocks(m.id)}</div>
     </div>`;
-  const managedHtml = managed.map(m => block(m, 'Ty prowadzisz tę listę: wpisujesz życzenia i list. Prezenty dla innych kupujesz ze swojego konta.', `
+  const managedHtml = managed.map(m => block(m, 'Bez konta — życzenia i list wpisujesz Ty.', `
         <div class="actions managed-actions">
           <button class="a quiet" data-act="person-link" data-id="${m.id}">Przekaż listę tej osobie</button>
           <button class="a quiet" data-act="remove-person" data-id="${m.id}">Usuń osobę</button>
@@ -383,15 +384,11 @@ function vMine() {
         ${field('Imię, np. Zosia albo Babcia Hela', '<input class="in" id="f-person" maxlength="60">')}
         <div class="actions"><button class="a solid" data-act="save-person">Dodaj osobę</button><button class="a quiet" data-act="cancel-person">Anuluj</button></div>
       </div></div>`
-    : `<div class="add-person">
-        <p class="sub">Dziecko bez telefonu albo ktoś, kto nie chce korzystać z aplikacji? Dodaj tę osobę i wpisuj życzenia oraz list za nią.</p>
-        <div class="actions mt"><button class="a line" data-act="add-person">Dodaj osobę</button></div>
-      </div>`;
+    : `<p class="add-person sub">Ktoś bez telefonu? <button class="a" data-act="add-person">Dodaj osobę</button> i wpisuj życzenia za nią.</p>`;
 
   return `${vHead()}<section class="fade">
     <h1 class="title">Moje</h1>
-    <p class="sub">Twoje życzenia i list${managed.length ? ' oraz osoby, które prowadzisz' : ''}.</p>
-    <div class="own">${block(member(me().id), 'Twoje życzenia i list do Mikołaja.')}</div>
+    <div class="own">${block(member(me().id))}</div>
     ${managedHtml}
     ${addPerson}
   </section>`;

@@ -145,7 +145,8 @@ button[disabled] { opacity: .5; cursor: default; }
 .mine-letter { font: 400 1.3125rem/1.55 var(--serif); margin: 0 0 12px; white-space: pre-line; overflow-wrap: anywhere; }
 .mine-letter .salut { font-style: italic; color: var(--soft); }
 .priv { color: var(--faint); font-size: 0.875rem; margin: 0 0 4px; }
-.managed, .add-person { margin-top: 72px; }
+.managed { margin-top: 72px; }
+.add-person { margin-top: 120px; }
 .managed-name { font: 400 2rem/1.1 var(--serif); letter-spacing: -.015em; margin: 0 0 6px; }
 .managed > .sub { max-width: 26em; }
 .managed > .sec:first-of-type { margin-top: 20px; }
@@ -319,7 +320,7 @@ select.in:invalid { color: var(--faint); }
   .own > .managed, .title + .sub + .managed { margin-top: 64px; }
   .managed-name { font-size: 2.5rem; }
   .managed-body .sec:first-child { margin-top: 0; }
-  .add-person { margin-top: 112px; max-width: 30em; }
+  .add-person { margin-top: 160px; max-width: 30em; }
 
   /* kto co kupuje jako tabela bez linii */
   .res { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 32px; align-items: baseline; }
