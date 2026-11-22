@@ -26,7 +26,7 @@ const S = {
   demo: false,
   screen: 'lists',            // lists | mine | family | login | join | link
   open: new Set(),            // rozwinięte sekcje
-  filter: {}, editWish: null, adding: null, editLetter: null, addingPerson: false,
+  editWish: null, adding: null, editLetter: null, addingPerson: false,
   menu: false, fam: null, famView: 'for', confirm: null, assign: null, editOwner: null,
 };
 let theme = 'auto';
@@ -231,7 +231,8 @@ function vLists() {
   const d = daysToEve();
   const mine = member(me().id);
   const missing = !wishesOf(mine.id).length ? 'życzeń' : !mine.letter ? 'listu' : '';
-  const order = { mine: 0, free: 1, taken: 2 };
+  // najpierw to, co jeszcze można kupić; potem to, co kupujesz Ty, i to, co już ktoś wziął — w każdej grupie od najtańszych
+  const order = { free: 0, mine: 1, taken: 2 };
   return `${vHead()}<section class="fade">
     <div class="title-row"><h1 class="title">Listy</h1>
       ${others.length ? `<button class="a" data-act="toggle-all">Rozwiń wszystkie</button>` : ''}</div>
@@ -241,23 +242,15 @@ function vLists() {
     ${others.length ? others.map(p => {
       const ws = wishesOf(p.id);
       const free = ws.filter(w => !w.taken);
-      const f = S.filter[p.id] || 'all';
-      const shown = (f === 'free' ? free : ws).slice().sort((a, b) => order[status(a)] - order[status(b)]);
-      const by = p.managedBy ? (p.managedBy === me().id ? 'list prowadzisz Ty' : `list prowadzi ${esc(member(p.managedBy)?.name)}`) : '';
+      const sorted = ws.slice().sort((a, b) => order[status(a)] - order[status(b)] || tierIx(a) - tierIx(b));
+      const by = p.managedBy === me().id ? 'list prowadzisz Ty' : '';
       const head = `<button class="name" data-toggle="p:${p.id}">${esc(p.name)}${by ? `<small>${by}</small>` : ''}</button>
-        <span class="count">${ws.length ? `${free.length} z ${ws.length} wolne` : 'pusto'}</span>`;
+        <span class="count">${!ws.length ? 'pusto' : free.length ? `${free.length} z ${ws.length} wolne` : 'wszystko wybrane'}</span>`;
       const body = `
         ${p.letter ? `<p class="letter">Drogi Mikołaju, ${esc(p.letter)}</p>` : ''}
-        ${ws.length ? `
-          ${free.length !== ws.length ? `<div class="filter">
-            <button data-filter="all" data-pid="${p.id}" aria-pressed="${f === 'all'}">wszystkie</button>
-            <button data-filter="free" data-pid="${p.id}" aria-pressed="${f === 'free'}">tylko wolne</button>
-          </div>` : ''}
-          ${shown.length ? byTier(shown, vGift) : '<p class="empty">Wszystko już ktoś kupuje.</p>'}
-        ` : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
+        ${ws.length ? sorted.map(vGift).join('') : `<p class="empty">${p.managedBy === me().id ? 'Nie ma tu jeszcze życzeń.' : `${esc(p.name)} nie ma jeszcze życzeń.`}</p>`}
         ${p.managedBy === me().id ? `<div class="actions mt"><button class="a line" data-go="mine">Zmień życzenia i list</button></div>`
-          : god() ? `<div class="actions mt"><button class="a line" data-act="edit-person" data-id="${p.id}">Zmień życzenia i list</button></div>` : ''}
-        <p class="end">Koniec listy · <button class="a" data-toggle="p:${p.id}">Zwiń</button></p>`;
+          : god() ? `<div class="actions mt"><button class="a line" data-act="edit-person" data-id="${p.id}">Zmień życzenia i list</button></div>` : ''}`;
       return fold('p:' + p.id, 'person', head, body);
     }).join('') : `<p class="empty">Nikogo tu jeszcze nie ma.${me().isAdmin ? '' : ' Organizator może wysłać zaproszenie.'}</p>
       ${me().isAdmin ? '<div class="actions mt"><button class="a solid" data-go="family">Zaproś bliskich</button></div>' : ''}`}
@@ -630,7 +623,7 @@ function render(animate = false) {
 }
 // po przełączeniu rodziny: czysty stan widoku
 function enterFamily(screen = 'lists') {
-  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null, filter: {}, admin: null });
+  Object.assign(S, { screen, menu: false, editWish: null, adding: null, editLetter: null, addingPerson: false, fam: null, confirm: null, assign: null, admin: null });
   S.open.clear();
   history.replaceState(null, '', TABS[screen]);
   window.scrollTo(0, 0);
@@ -733,7 +726,7 @@ function setTheme(t) {
 // kliknięcie zapamiętuje skrypt w index.html, a start() powtarza je, zamiast je nadpisać.
 let booted = false;
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-go],[data-toggle],[data-edit],[data-act],[data-filter]');
+  const t = e.target.closest('[data-go],[data-toggle],[data-edit],[data-act]');
   if (!t) return;
   const d = t.dataset;
   if (!booted) return;
@@ -741,7 +734,6 @@ document.addEventListener('click', e => {
   if (d.go) return go(d.go);
   if (d.toggle) { toggleFold(d.toggle); return syncAll(); }
   if (d.edit) return settle(() => { S.editWish = d.edit; S.adding = null; S.editLetter = null; S.confirm = null; S.open.add(secKey('wishes', wish(d.edit).ownerId)); }).then(focusFirst);
-  if (d.filter) { S.filter[d.pid] = d.filter; return render(); }
   const id = d.id;
   switch (d.act) {
     case 'toggle-all': {

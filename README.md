@@ -25,7 +25,7 @@ The app is in Polish, minimalist by design (white and dark grey, a serif for acc
 
 ### For everyone
 
-- **Listy** — the family's lists. Each person folds open to their letter and wishes, sorted from cheapest. *Kupię to* (“I'll buy this”) reserves a gift; the name sticks to the top while you scroll through that person's list.
+- **Listy** — the family's lists. Each person folds open to their letter and wishes, free gifts first, each group sorted from cheapest. *Kupię to* (“I'll buy this”) reserves a gift; the name sticks to the top while you scroll through that person's list.
 - **Kupuję** — what you've picked for others, grouped by recipient, with *mark as bought* and *give up*. The tab appears only once you've reserved something.
 - **Moje** — your own letter and wishes, plus any people you manage.
 - **Budget tiers instead of prices** — every wish is tagged *Drobnostki* (up to 50 zł), *Nie było niegrzecznie* (50–200 zł), *To był grzeczny rok* (200–300 zł) or *Byłem aniołkiem* (no limit). Lists are ordered by tier.
