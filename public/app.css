@@ -108,8 +108,6 @@ button[disabled] { opacity: .5; cursor: default; }
 .person .name small { display: block; font: 400 0.875rem/1.3 var(--sans); color: var(--faint); margin-top: 2px; }
 .person .count { font-size: 0.9375rem; color: var(--faint); white-space: nowrap; }
 .person .peek-inner { padding: 2px 0 14px; }
-.end { margin: 22px 0 0; font-size: 0.9375rem; color: var(--faint); }
-.fold.fits .end { display: none; }
 .sec { --peek: 420px; --fade: 80px; margin-top: 44px; }
 .sec .fold-head { padding-top: 10px; }
 .sec .fold-head h2 { font-size: 0.875rem; font-weight: 400; color: var(--faint); margin: 0; }
@@ -279,7 +277,7 @@ select.in:invalid { color: var(--faint); }
 
   /* wszystko rozwinięte — szerokość pozwala, a imię po lewej mówi, czyja to lista */
   .fold > .peek { max-height: none; -webkit-mask-image: none; mask-image: none; }
-  .fold > .more, .fold-head .toggle, [data-act="toggle-all"], .end { display: none; }
+  .fold > .more, .fold-head .toggle, [data-act="toggle-all"] { display: none; }
 
   /* Listy: imię przyklejone w lewej kolumnie, dopóki trwa jego lista */
   .people { margin-top: 64px; }
