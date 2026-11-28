@@ -512,7 +512,7 @@ function vEdit() {
   </section>`;
 }
 
-const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/mark.webp" alt="" width="36" height="36"></button>';
+const MARK = '<button class="mark" data-go="landing" aria-label="Mikołaj — strona główna"><img src="/mark.webp?v=2" alt="" width="36" height="36"></button>';
 const PUB = () => `<div class="topbar"><header class="head pub">${MARK}${themeBtn()}</header></div>`;
 function vAuth() {
   const I = S.info || {};
