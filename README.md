@@ -71,7 +71,7 @@ public/            frontend — plain HTML, CSS and ES-module JavaScript, no bui
   demo.js          the demo family — fetched only when someone opens it
   newsreader*.woff2   self-hosted serif: a preloaded core (Latin + Polish) and an -ext part for other
                    Latin letters, fetched only when such a character is on the page; body text uses the system font
-  *.png, *.webp, favicon.ico, site.webmanifest   icons and web-app manifest
+  *.png, *.webp, favicon.ico, favicon.svg, site.webmanifest   icons and web-app manifest (favicon.svg switches dark/light with the browser theme)
 src/worker.js      Cloudflare Worker + one SQLite-backed Durable Object (FamilyStore)
 wrangler.toml      the whole configuration of an installation
 tests/security.mjs security regression tests against an in-memory SQLite database

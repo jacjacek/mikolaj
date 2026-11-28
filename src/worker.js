@@ -789,6 +789,8 @@ export default {
     if (asset.status === 404) return new Response('Nie znaleziono strony.', { status: 404, headers: SECURITY });
     const response = new Response(asset.body, asset);
     for (const [name, value] of Object.entries(SECURITY)) response.headers.set(name, value);
+    // favicon.svg przełącza kolor własnym <style> (prefers-color-scheme) — skryptów i tak nie ma
+    if (url.pathname.endsWith('.svg')) response.headers.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
     // ikony i fonty leżą w pamięci przeglądarki rok (nowa wersja pliku = nowa nazwa); kod jest zawsze sprawdzany na nowo
     const lasting = /^(image|font)\//.test(response.headers.get('Content-Type') || '');
     response.headers.set('Cache-Control', lasting ? 'public, max-age=31536000, immutable' : 'no-cache');
